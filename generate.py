@@ -132,21 +132,44 @@ def _generate_anthropic(system: str, user: str) -> str:
     return text.strip()
 
 
+# remembers the last key that worked so we don't keep starting on an exhausted one
+_GEMINI_KEY_INDEX = 0
+
+
 def _generate_gemini(system: str, user: str) -> str:
-    """Google Gemini backend (google-genai SDK). Free via Google AI Studio."""
+    """Google Gemini backend (google-genai SDK), free via AI Studio.
+
+    Rotates through config.GEMINI_API_KEYS: on a 429/quota error it moves to the
+    next key and retries, and sticks with whichever key worked.
+    """
     from google import genai
     from google.genai import types
+    from google.genai import errors
 
-    client = genai.Client(api_key=config.GEMINI_API_KEY)
-    response = client.models.generate_content(
-        model=config.GEMINI_LLM_MODEL,
-        contents=user,
-        config=types.GenerateContentConfig(
-            system_instruction=system,
-            temperature=0.0,
-        ),
-    )
-    return (response.text or "").strip()
+    keys = config.GEMINI_API_KEYS
+    if not keys:
+        raise RuntimeError("No Gemini key set -- add GEMINI_API_KEY to .env.")
+
+    global _GEMINI_KEY_INDEX
+    cfg = types.GenerateContentConfig(system_instruction=system, temperature=0.0)
+    last_err = None
+
+    for offset in range(len(keys)):
+        idx = (_GEMINI_KEY_INDEX + offset) % len(keys)
+        try:
+            client = genai.Client(api_key=keys[idx])
+            response = client.models.generate_content(
+                model=config.GEMINI_LLM_MODEL, contents=user, config=cfg
+            )
+            _GEMINI_KEY_INDEX = idx
+            return (response.text or "").strip()
+        except errors.APIError as e:
+            # rotate on rate limit / quota; anything else is a real error
+            if getattr(e, "code", None) != 429 and "RESOURCE_EXHAUSTED" not in str(e):
+                raise
+            last_err = e
+
+    raise RuntimeError(f"All {len(keys)} Gemini keys are rate-limited.") from last_err
 
 
 def _passages_too_weak(passages: List[Passage]) -> bool:

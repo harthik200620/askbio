@@ -72,6 +72,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # accept either env var name for the Google key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+GEMINI_API_KEY_2 = os.getenv("GEMINI_API_KEY_2", "")
+GEMINI_API_KEY_3 = os.getenv("GEMINI_API_KEY_3", "")
+# all configured keys, in order, for round-robin when one hits its rate limit
+GEMINI_API_KEYS = [k for k in (GEMINI_API_KEY, GEMINI_API_KEY_2, GEMINI_API_KEY_3) if k]
 
 ABSTAIN_MESSAGE = "I don't have enough information in the literature to answer that."
 PUBMED_URL = "https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
