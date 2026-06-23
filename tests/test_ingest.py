@@ -1,9 +1,5 @@
 """
-Standard-library-only tests for ingest.py.
-
-These never touch the network or the ``datasets`` library: they exercise the
-pure helpers - ``_to_snippet`` (defensive schema mapping), ``_dedupe_by_id``,
-and the JSONL write/read round-trip. Run with::
+Tests for the ingest.py helpers (no network, no datasets dependency).
 
     python -m unittest tests.test_ingest      # from the askbio/ folder
 """
@@ -15,15 +11,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-# Make the askbio/ package root importable when run as a bare file.
+# Make the askbio/ root importable when run as a bare file.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import ingest  # noqa: E402  (path tweak must happen before this import)
 
 
 class TestToSnippet(unittest.TestCase):
-    """_to_snippet must map the many possible raw shapes onto a Snippet."""
-
     def test_content_key(self):
         rec = {"id": "a1", "content": "x" * 50, "title": "T"}
         snip = ingest._to_snippet(rec, 0)
@@ -33,7 +27,6 @@ class TestToSnippet(unittest.TestCase):
         self.assertEqual(snip["title"], "T")
 
     def test_contents_key(self):
-        # "contents" (plural) is an alternative dump column name.
         rec = {"id": "a2", "contents": "y" * 50}
         snip = ingest._to_snippet(rec, 0)
         self.assertEqual(snip["text"], "y" * 50)
@@ -47,7 +40,7 @@ class TestToSnippet(unittest.TestCase):
         self.assertEqual(ingest._to_snippet(rec, 0)["text"], "w" * 50)
 
     def test_content_preferred_over_abstract(self):
-        # When several text keys exist, the first in priority order wins.
+        # When several text keys exist, first in priority order wins.
         rec = {"id": "a5", "content": "first" * 10, "abstract": "second" * 10}
         self.assertTrue(ingest._to_snippet(rec, 0)["text"].startswith("first"))
 
@@ -60,14 +53,13 @@ class TestToSnippet(unittest.TestCase):
         self.assertEqual(ingest._to_snippet(rec, 0)["pmid"], "67890")
 
     def test_pmid_integer_value(self):
-        # Regression: MedRAG/pubmed stores PMID as an int (e.g. 21). It must be
-        # coerced and used, NOT skipped in favor of digit-parsing the id (which
-        # would wrongly yield the dump year, e.g. "pubmed23n0001" -> "23").
+        # MedRAG/pubmed stores PMID as an int; it has to be coerced and used, not
+        # skipped in favor of the id's digits (which give the dump year, "23").
         rec = {"id": "pubmed23n0001_5", "text": "t" * 50, "PMID": 21}
         self.assertEqual(ingest._to_snippet(rec, 0)["pmid"], "21")
 
     def test_pmid_extracted_from_id(self):
-        # No pmid field -> dig the first digit run out of the id string.
+        # No pmid field, so fall back to the first digit run in the id.
         rec = {"id": "pubmed23n0001_99887766", "text": "t" * 50}
         self.assertEqual(ingest._to_snippet(rec, 0)["pmid"], "23")
 
@@ -84,7 +76,7 @@ class TestToSnippet(unittest.TestCase):
         self.assertIsNone(ingest._to_snippet(rec, 0))
 
     def test_fallback_id_from_index(self):
-        # Record without an id gets a deterministic "row{i}" id.
+        # No id -> "row{i}".
         rec = {"text": "t" * 50}
         self.assertEqual(ingest._to_snippet(rec, 7)["id"], "row7")
 
@@ -106,8 +98,6 @@ class TestDedupeById(unittest.TestCase):
 
 
 class TestJsonlRoundTrip(unittest.TestCase):
-    """Write a couple of Snippets, read them back, expect identity."""
-
     def test_round_trip(self):
         snips = [
             {"id": "1", "pmid": "111", "title": "Alpha", "text": "hello world"},

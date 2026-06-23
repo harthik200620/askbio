@@ -1,42 +1,10 @@
 """
-AskBio - Phase 5: evaluation (the "resume gold" metric).
+Evaluation for AskBio: scores RAG quality (via ragas) and yes/no/maybe accuracy
+on a sample of PubMedQA, writes a CSV + bar chart, and prints a summary.
 
-Plain-English idea
-------------------
-A RAG system that *sounds* confident is worthless if it quietly makes things up.
-Evaluation is how we prove AskBio is trustworthy instead of merely fluent, and it
-is the single most interview-worthy artifact in this project: it turns "I built a
-chatbot" into "I measured my chatbot and here are the numbers".
-
-We score two complementary things on a held-out slice of **PubMedQA** (expert
-yes/no/maybe questions with long reference answers):
-
-1. **RAG quality, via ragas** - three LLM-judged metrics that target the failure
-   modes of retrieval-augmented generation:
-     * ``faithfulness``       - is every claim in the answer supported by the
-                                retrieved passages? (catches hallucination)
-     * ``answer_relevancy``   - does the answer actually address the question?
-     * ``context_precision``  - did retrieval surface the *useful* passages near
-                                the top, not bury them under noise?
-   ragas uses a judge LLM + embeddings to grade these, so it needs an API key. If
-   no OpenAI key is configured we **skip ragas with a clear warning** and still
-   produce the accuracy section - the eval degrades gracefully instead of
-   crashing, which matters when someone clones the repo to try it for free.
-
-2. **Task accuracy** - PubMedQA ships a gold ``final_decision`` label
-   (yes/no/maybe). We map our free-text answer back to one of those labels with a
-   small, transparent keyword heuristic (``predict_label``) and report the share
-   we got right. This is a blunt-but-honest end-to-end score that needs no LLM.
-
-Outputs: a per-item + aggregate CSV (``config.EVAL_RESULTS_PATH``) and a bar
-chart of the aggregate metrics (``config.EVAL_CHART_PATH``), plus a printed
-summary table. ``run_eval`` returns the aggregate dict so callers can assert on
-it.
-
-Heavy / optional dependencies (``datasets``, ``ragas``, ``matplotlib``,
-``langchain_openai``) are imported **lazily inside the functions that need
-them**, so the pure helpers below - ``predict_label`` and ``compute_accuracy`` -
-import and unit-test cleanly with nothing but the standard library installed.
+The heavy/optional deps (datasets, ragas, matplotlib, langchain_openai) are
+imported lazily inside the functions that use them, so predict_label and
+compute_accuracy can be imported and unit-tested with just the stdlib.
 """
 from __future__ import annotations
 
@@ -46,16 +14,11 @@ from typing import Optional
 
 import config
 
-# --------------------------------------------------------------------------- #
-# Pure helpers (no heavy imports) - these are the unit-tested core.
-# --------------------------------------------------------------------------- #
-
-# The three labels PubMedQA uses for its expert ``final_decision`` field.
+# Labels PubMedQA uses in its final_decision field.
 _VALID_LABELS = ("yes", "no", "maybe")
 
-# Phrases that signal the system declined to answer. When an answer is an
-# abstention we must NOT guess yes/no/maybe - that would reward a non-answer.
-# Kept lowercase; matched as substrings against the lowercased answer.
+# Substrings that mean the answer abstained; if any match we don't guess a
+# yes/no/maybe verdict. Lowercase, compared against the lowercased answer.
 _ABSTAIN_MARKERS = (
     config.ABSTAIN_MESSAGE.lower(),
     "i don't have enough information",
@@ -68,38 +31,24 @@ _ABSTAIN_MARKERS = (
 
 
 def predict_label(answer: str) -> str:
-    """
-    Map a free-text answer onto a PubMedQA label: "yes" | "no" | "maybe" |
-    "unknown".
+    """Map a free-text answer to "yes"/"no"/"maybe"/"unknown".
 
-    Heuristic (deliberately simple and auditable - we want a label we can defend,
-    not a black box):
-      1. Empty or abstaining answers -> "unknown" (we refuse to score a
-         non-answer as if it were a real yes/no/maybe).
-      2. "maybe" wins if hedging language is present ("maybe", "unclear",
-         "inconclusive", "may ", "might", "possibly", "uncertain") - hedging is
-         the whole point of the maybe class, so it takes priority over a stray
-         "yes"/"no".
-      3. Otherwise look at the FIRST explicit yes/no signal: scan for a "yes"
-         word and a "no" word and take whichever appears earliest in the text
-         (answers tend to lead with their verdict).
-      4. No signal at all -> "unknown".
+    Just a keyword heuristic, not a classifier: abstentions and empty answers are
+    "unknown", any hedging word wins "maybe", otherwise the earliest of yes/no
+    wins. Good enough to score against PubMedQA's gold labels.
     """
     if not answer or not answer.strip():
         return "unknown"
 
     text = answer.lower()
 
-    # (1) An abstention is not a yes/no/maybe answer.
     if any(marker in text for marker in _ABSTAIN_MARKERS):
         return "unknown"
 
-    # (2) Hedging -> "maybe". Word-boundary matches avoid firing on substrings
-    # like "mayonnaise" or "another".
+    # Hedging beats a stray yes/no. \b avoids "mayonnaise", "another", etc.
     if re.search(r"\b(maybe|unclear|inconclusive|may|might|possibly|uncertain)\b", text):
         return "maybe"
 
-    # (3) Earliest explicit yes/no wins.
     yes_match = re.search(r"\byes\b", text)
     no_match = re.search(r"\bno\b", text)
     if yes_match and no_match:
@@ -109,29 +58,22 @@ def predict_label(answer: str) -> str:
     if no_match:
         return "no"
 
-    # (4) Nothing decisive found.
     return "unknown"
 
 
 def compute_accuracy(pairs: list[tuple[str, str]]) -> dict:
-    """
-    Accuracy over (predicted_label, gold_label) pairs.
+    """Accuracy over (predicted, gold) pairs.
 
-    We only score pairs where a label was actually predicted: a "unknown"
-    prediction means our heuristic could not read a verdict out of the answer, so
-    counting it as "wrong" would conflate "model abstained / was unparseable"
-    with "model gave the wrong verdict". Reporting both numbers (``scored`` vs
-    total) keeps that distinction honest.
-
-    Returns a dict with: ``accuracy`` (float in [0,1] over scored items, or 0.0
-    when nothing was scored), ``correct``, ``scored``, and ``total``.
+    "unknown" predictions are excluded from the denominator rather than counted
+    wrong -- otherwise an unparseable answer looks the same as a wrong verdict.
+    We report scored vs total so that's visible.
     """
     total = len(pairs)
     scored = 0
     correct = 0
     for predicted, gold in pairs:
         if predicted == "unknown":
-            continue  # heuristic gave no verdict -> not scoreable
+            continue
         scored += 1
         if predicted == gold:
             correct += 1
@@ -140,12 +82,7 @@ def compute_accuracy(pairs: list[tuple[str, str]]) -> dict:
 
 
 def _sample_indices(n_rows: int, sample_size: int, seed: int) -> list[int]:
-    """
-    Deterministically choose row indices to evaluate.
-
-    Seeded so re-running the eval picks the SAME questions (reproducible numbers
-    you can quote). If ``sample_size`` >= dataset size we just take everything.
-    """
+    """Pick row indices to evaluate, seeded so re-runs hit the same questions."""
     indices = list(range(n_rows))
     if sample_size >= n_rows:
         return indices
@@ -154,32 +91,21 @@ def _sample_indices(n_rows: int, sample_size: int, seed: int) -> list[int]:
 
 
 def _has_openai_key() -> bool:
-    """True if an OpenAI key is configured (controls whether ragas can run)."""
     return bool(config.OPENAI_API_KEY)
 
 
-# --------------------------------------------------------------------------- #
-# ragas wiring (lazy) - the LLM-judged RAG metrics.
-# --------------------------------------------------------------------------- #
 def _build_ragas_judge():
-    """
-    Build the (llm, embeddings) pair ragas uses as its *judge*, targeting the
-    **ragas 0.2.x** API.
+    """Build the (llm, embeddings) judge ragas grades rows with.
 
-    ragas does not call our generator here - it independently grades the rows we
-    hand it, and to do that it needs its own LLM + embeddings. We configure them
-    explicitly (rather than relying on ragas' implicit default) so the judge is
-    pinned to ``config.OPENAI_LLM_MODEL`` / ``config.OPENAI_EMBED_MODEL`` and the
-    eval is reproducible. We wrap LangChain objects in ragas' wrappers, which is
-    the documented 0.2.x integration path.
-
-    All imports are local: this function only runs when a key is present.
+    ragas needs its own LLM + embeddings (it doesn't reuse our generator). We
+    pin them to the configured models for reproducibility and wrap the LangChain
+    objects in ragas' wrappers -- the 0.2.x integration path. Only called when a
+    key is present, so imports stay local.
     """
     from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     from ragas.embeddings import LangchainEmbeddingsWrapper
     from ragas.llms import LangchainLLMWrapper
 
-    # temperature=0 -> as deterministic a judge as the API allows.
     chat = ChatOpenAI(model=config.OPENAI_LLM_MODEL, temperature=0,
                       api_key=config.OPENAI_API_KEY)
     embed = OpenAIEmbeddings(model=config.OPENAI_EMBED_MODEL,
@@ -190,17 +116,11 @@ def _build_ragas_judge():
 
 
 def _run_ragas(rows: list[dict]) -> dict:
-    """
-    Score ``rows`` with ragas and return ``{metric_name: float}``.
+    """Score rows with ragas, returning {metric_name: float}.
 
-    ``rows`` must already be in ragas' expected shape - one dict per item with
-    keys ``question``, ``answer``, ``contexts`` (list[str]) and ``ground_truth``.
-    We build a ``datasets.Dataset`` from them (the column layout ragas 0.2.x
-    reads) and call ``ragas.evaluate`` with our explicit judge + the three
-    metrics.
-
-    Raises on failure; the caller wraps this in try/except so a ragas/API hiccup
-    degrades to "accuracy only" instead of crashing the whole eval.
+    rows must already have the keys ragas 0.2.x reads as columns: question,
+    answer, contexts (list[str]), ground_truth. Raises on failure -- the caller
+    catches it and falls back to accuracy only.
     """
     from datasets import Dataset
     from ragas import evaluate
@@ -208,21 +128,17 @@ def _run_ragas(rows: list[dict]) -> dict:
 
     judge_llm, judge_embeddings = _build_ragas_judge()
 
-    # Dataset.from_list builds columns from our list-of-dicts; ragas 0.2.x reads
-    # the `question / answer / contexts / ground_truth` columns by name.
     dataset = Dataset.from_list(rows)
     metrics = [faithfulness, answer_relevancy, context_precision]
 
     result = evaluate(
         dataset=dataset,
         metrics=metrics,
-        llm=judge_llm,            # explicit judge LLM (no implicit global default)
+        llm=judge_llm,
         embeddings=judge_embeddings,
     )
 
-    # In 0.2.x the EvaluationResult is dict-like and also exposes to_pandas().
-    # We average each metric column to get one aggregate score per metric, which
-    # is robust whether a value comes back as a scalar or a per-row series.
+    # Average each metric column; works whether a value is a scalar or per-row.
     scores = result.to_pandas()
     out: dict = {}
     for name in ("faithfulness", "answer_relevancy", "context_precision"):
@@ -231,15 +147,9 @@ def _run_ragas(rows: list[dict]) -> dict:
     return out
 
 
-# --------------------------------------------------------------------------- #
-# Data loading + the per-item RAG pass.
-# --------------------------------------------------------------------------- #
 def _load_eval_rows(sample_size: int) -> list[dict]:
-    """
-    Load + deterministically sample PubMedQA, returning the raw fields we need:
-    ``question``, ``final_decision`` (gold label) and ``long_answer`` (reference
-    answer used as ragas' ground_truth).
-    """
+    """Load and sample PubMedQA, keeping question, final_decision (gold label)
+    and long_answer (used as ragas' ground_truth)."""
     from datasets import load_dataset
 
     ds = load_dataset(config.HF_EVAL, config.EVAL_CONFIG, split="train")
@@ -259,39 +169,26 @@ def _load_eval_rows(sample_size: int) -> list[dict]:
 
 
 def _answer_one(question: str) -> dict:
-    """
-    Run the real RAG pipeline for one question: retrieve passages, then generate
-    a grounded answer. Returns ``{"answer": str, "contexts": list[str]}``.
+    """Retrieve + generate for one question. Returns answer and contexts.
 
-    Imported lazily so this module loads without the retrieval/generation stack
-    (and their heavy deps) being importable - the pure helpers stay testable.
+    Imports are lazy so the module loads (and the pure helpers test) without the
+    retrieval/generation stack installed.
     """
     import generate
     import retrieve
 
     passages = retrieve.retrieve(question)
     res = generate.generate_answer(question, passages)
-    # ragas wants the contexts as a list of plain strings.
     contexts = [p["text"] for p in passages]
     return {"answer": res["answer"], "contexts": contexts}
 
 
-# --------------------------------------------------------------------------- #
-# Output: CSV, chart, summary table.
-# --------------------------------------------------------------------------- #
 def _save_csv(per_item: list[dict], aggregate: dict) -> None:
-    """
-    Write the per-item results plus a trailing aggregate summary to
-    ``config.EVAL_RESULTS_PATH`` using pandas.
-
-    The aggregate metrics are appended as extra columns on a final ``__AGGREGATE__``
-    marker row so the whole eval (rows + headline numbers) lives in one file.
-    """
+    """Write per-item rows + a trailing __AGGREGATE__ row to the results CSV."""
     import pandas as pd
 
     df = pd.DataFrame(per_item)
 
-    # One summary row carrying the aggregate scalars; NaN elsewhere is expected.
     summary_row = {"id": "__AGGREGATE__"}
     summary_row.update({f"agg_{k}": v for k, v in aggregate.items()})
     df = pd.concat([df, pd.DataFrame([summary_row])], ignore_index=True)
@@ -302,19 +199,12 @@ def _save_csv(per_item: list[dict], aggregate: dict) -> None:
 
 
 def _save_chart(aggregate: dict) -> None:
-    """
-    Save a bar chart of the aggregate metric values to ``config.EVAL_CHART_PATH``.
-
-    Only plots the numeric headline metrics (the ragas scores + accuracy), each
-    naturally on a 0..1 scale, so a single shared y-axis reads cleanly. Uses the
-    non-interactive "Agg" backend so it works headless (CI, servers).
-    """
+    """Bar chart of the aggregate metrics (all 0..1) to the chart path."""
     import matplotlib
-    matplotlib.use("Agg")  # headless: render to file, never open a window
+    matplotlib.use("Agg")  # headless, render straight to file
     import matplotlib.pyplot as plt
 
-    # Pull the plottable 0..1 metrics in a stable order; skip anything missing
-    # (e.g. ragas keys absent when it was skipped).
+    # Skip any metric that's missing (e.g. ragas keys when it was skipped).
     candidates = ["faithfulness", "answer_relevancy", "context_precision", "accuracy"]
     names = [m for m in candidates if isinstance(aggregate.get(m), (int, float))]
     values = [float(aggregate[m]) for m in names]
@@ -325,7 +215,6 @@ def _save_chart(aggregate: dict) -> None:
         ax.set_ylim(0, 1)
         ax.set_ylabel("score (0-1)")
         ax.set_title("AskBio evaluation - aggregate metrics")
-        # Label each bar with its value for an at-a-glance read.
         for bar, value in zip(bars, values):
             ax.text(bar.get_x() + bar.get_width() / 2, value + 0.02,
                     f"{value:.2f}", ha="center", va="bottom", fontsize=9)
@@ -341,7 +230,6 @@ def _save_chart(aggregate: dict) -> None:
 
 
 def _print_summary(aggregate: dict, ragas_skipped: bool) -> None:
-    """Print a small aligned summary table of the headline numbers."""
     print("\n" + "=" * 44)
     print("AskBio evaluation summary")
     print("=" * 44)
@@ -358,29 +246,16 @@ def _print_summary(aggregate: dict, ragas_skipped: bool) -> None:
     print("=" * 44 + "\n")
 
 
-# --------------------------------------------------------------------------- #
-# Orchestrator.
-# --------------------------------------------------------------------------- #
 def run_eval(sample_size: int = config.EVAL_SAMPLE_SIZE) -> dict:
-    """
-    End-to-end evaluation. See the module docstring for the "why".
-
-    Steps:
-      1. Load + deterministically sample PubMedQA.
-      2. For each item: ``retrieve()`` -> ``generate_answer()``; collect the row
-         shape ragas wants (question / answer / contexts / ground_truth) and the
-         predicted vs gold label for accuracy.
-      3. ragas (faithfulness / answer_relevancy / context_precision), guarded:
-         if no OpenAI key OR ragas errors, skip it with a warning and continue.
-      4. Compute yes/no/maybe accuracy.
-      5. Save CSV + bar chart, print a summary, and return the aggregate dict.
-    """
+    """Run the whole eval: sample PubMedQA, retrieve+generate per item, score
+    with ragas (skipped if no key), compute accuracy, write outputs, return the
+    aggregate dict."""
     items = _load_eval_rows(sample_size)
     print(f"[eval] evaluating {len(items)} PubMedQA items "
           f"(seed={config.RANDOM_SEED})")
 
-    ragas_rows: list[dict] = []   # fed to ragas
-    per_item: list[dict] = []     # fed to the CSV
+    ragas_rows: list[dict] = []   # for ragas
+    per_item: list[dict] = []     # for the CSV
     label_pairs: list[tuple[str, str]] = []
 
     for i, item in enumerate(items):
@@ -415,7 +290,7 @@ def run_eval(sample_size: int = config.EVAL_SAMPLE_SIZE) -> dict:
             }
         )
 
-    # ---- ragas (graceful degradation) ----
+    # ragas, but skip (don't crash) if there's no key or it errors.
     aggregate: dict = {}
     ragas_skipped = False
     if not _has_openai_key():
@@ -431,7 +306,6 @@ def run_eval(sample_size: int = config.EVAL_SAMPLE_SIZE) -> dict:
             print(f"[eval] WARNING: ragas evaluation failed ({exc!r}) - "
                   "continuing with accuracy only.")
 
-    # ---- accuracy ----
     acc = compute_accuracy(label_pairs)
     aggregate["accuracy"] = acc["accuracy"]
     aggregate["correct"] = acc["correct"]
@@ -439,7 +313,6 @@ def run_eval(sample_size: int = config.EVAL_SAMPLE_SIZE) -> dict:
     aggregate["n_items"] = acc["total"]
     aggregate["ragas_skipped"] = ragas_skipped
 
-    # ---- outputs ----
     _save_csv(per_item, aggregate)
     _save_chart(aggregate)
     _print_summary(aggregate, ragas_skipped)

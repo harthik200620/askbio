@@ -1,6 +1,6 @@
-# 🧬 AskBio — Biomedical RAG with Citations & an Abstention Guardrail
+# AskBio — Biomedical RAG with citations and an abstention guardrail
 
-AskBio answers biomedical questions from **real PubMed research** (the Hugging Face `MedRAG/pubmed` corpus), grounding every answer in retrieved passages and citing the supporting **PMIDs inline** as `[PMID:xxxx]`. When the literature doesn't actually support an answer, it **abstains** instead of hallucinating — because in a medical setting, a confident wrong answer is worse than "I don't know." It pairs hybrid retrieval (dense + keyword) with cross-encoder reranking and ships with a real **ragas** evaluation harness, so it's a chatbot you can *measure*, not just demo.
+AskBio answers biomedical questions from PubMed research (the Hugging Face `MedRAG/pubmed` corpus). It grounds every answer in retrieved passages and cites the supporting PMIDs inline as `[PMID:xxxx]`. When the retrieved literature doesn't support an answer, it abstains rather than guessing — in a medical setting a confident wrong answer is worse than "I don't know." Retrieval is hybrid (dense + keyword) with cross-encoder reranking, and there's a ragas evaluation harness so you can actually measure output quality instead of just eyeballing the demo.
 
 - **GitHub:** `<add-repo-link>`
 - **Live demo:** `<add-streamlit-link>`
@@ -33,19 +33,19 @@ AskBio answers biomedical questions from **real PubMed research** (the Hugging F
                                        + eval_chart.png
 ```
 
-*(Step 7 is the swappable-backend config layer — `EMBED_BACKEND` / `LLM_BACKEND` / `QDRANT_LOCAL` — that lets the exact same code run fully free or fully cloud.)*
+*(Step 7 is the swappable-backend config layer — `EMBED_BACKEND` / `LLM_BACKEND` / `QDRANT_LOCAL` — so the same code runs fully free or fully cloud.)*
 
 ---
 
-## Why it's strong
+## How it works
 
-- **Hybrid retrieval** — runs **dense vector search** (Qdrant, cosine) *and* **BM25 keyword search** in parallel. Embeddings catch paraphrase ("heart attack" ≈ "myocardial infarction"); BM25 nails exact rare tokens (gene names, drug codes) that embeddings miss. Neither alone is enough.
-- **Reciprocal Rank Fusion (RRF)** — fuses the two ranked lists on **rank position, not raw score**, so it never has to reconcile incompatible scales (cosine similarity vs. a BM25 term-weight sum). A passage ranked high in *both* lists wins — exactly the consensus behavior you want.
-- **Cross-encoder reranking** — a `ms-marco-MiniLM-L-6-v2` cross-encoder reads each (query, passage) pair *together* and re-scores the ~20 fused candidates down to the top 5. Far more precise than a bi-encoder, and only run on a small shortlist so the cost stays low.
-- **Grounded answers with validated citations** — the prompt forbids outside knowledge and pins every claim to the numbered passages. After generation, every `[PMID:xxxx]` token is regex-extracted and **checked against the passages actually retrieved**; any PMID the model invented is dropped. A clickable citation that doesn't support the claim is worse than none.
-- **Abstention guardrail** — if the passages don't support an answer, the model returns an exact opt-out phrase and the app flags `abstained`, shown to the user as a warning. This is the core anti-hallucination feature.
-- **Real evaluation, real numbers** — **ragas** (LLM-judged) scores faithfulness, answer relevancy, and context precision on a PubMedQA sample, plus a transparent yes/no/maybe accuracy. Outputs a CSV and a bar chart. This turns "I built a chatbot" into "I measured it."
-- **Deployed live** — Streamlit Community Cloud (app) + Qdrant Cloud (vector DB) + OpenAI (embeddings + answers). See `DEPLOY.md`.
+- **Hybrid retrieval** — dense vector search (Qdrant, cosine) and BM25 keyword search run in parallel. Embeddings catch paraphrase ("heart attack" ≈ "myocardial infarction"); BM25 catches exact rare tokens (gene names, drug codes) that embeddings tend to blur. Neither alone covers both cases.
+- **Reciprocal Rank Fusion (RRF)** — fuses the two ranked lists on rank position rather than raw score, so there's no need to reconcile incompatible scales (cosine similarity vs. a BM25 term-weight sum). A passage ranked high in both lists wins.
+- **Cross-encoder reranking** — a `ms-marco-MiniLM-L-6-v2` cross-encoder reads each (query, passage) pair together and re-scores the ~20 fused candidates down to the top 5. More precise than a bi-encoder, and it only runs on the shortlist so it stays cheap.
+- **Grounded answers with validated citations** — the prompt forbids outside knowledge and ties every claim to the numbered passages. After generation, each `[PMID:xxxx]` token is regex-extracted and checked against the passages actually retrieved; any PMID the model invented is dropped. A clickable citation that doesn't support its claim is worse than none.
+- **Abstention guardrail** — if the passages don't support an answer, the model returns a fixed opt-out phrase and the app flags `abstained` and shows it as a warning. This is the main anti-hallucination mechanism.
+- **Evaluation** — ragas (LLM-judged) scores faithfulness, answer relevancy, and context precision on a PubMedQA sample, alongside a plain keyword-based yes/no/maybe accuracy. Outputs a CSV and a bar chart.
+- **Deployable** — Streamlit Community Cloud (app) + Qdrant Cloud (vector DB) + OpenAI (embeddings + answers). See `DEPLOY.md`.
 
 ---
 
@@ -60,16 +60,16 @@ AskBio answers biomedical questions from **real PubMed research** (the Hugging F
 | Keyword search   | `rank-bm25` (BM25Okapi), pickled index                                 |
 | Fusion           | Reciprocal Rank Fusion (`k=60`)                                        |
 | Reranker         | `cross-encoder/ms-marco-MiniLM-L-6-v2` (sentence-transformers, CPU)    |
-| Generation       | `gpt-4o-mini` **or** Claude **or** a free extractive `"none"` backend  |
+| Generation       | `gpt-4o-mini` (OpenAI), Claude (Anthropic), Gemini, or a free extractive `"none"` backend |
 | Evaluation       | `ragas` 0.2.x (langchain pinned to 0.3.x) on `PubMedQA`                |
 | UI               | Streamlit                                                              |
 | Other            | `datasets`, `pandas`, `matplotlib`, `torch` (CPU)                      |
 
 ---
 
-## Try it FREE in 60 seconds (zero API keys)
+## Try it free (no API keys)
 
-The whole pipeline runs at **$0** — local embeddings, no LLM (extractive demo answers), on-disk Qdrant, tiny corpus.
+The whole pipeline can run at $0: local embeddings, no LLM (extractive demo answers), on-disk Qdrant, tiny corpus.
 
 ```bash
 cd askbio
@@ -93,7 +93,7 @@ python embed_index.py   # local embeddings → on-disk Qdrant + BM25 pickle
 streamlit run app.py    # open the browser UI
 ```
 
-> The free demo uses a generic 200-snippet slice purely to prove the plumbing end-to-end. Answer quality and citation relevance scale up sharply with a larger, topic-focused corpus and a real LLM — see below.
+> The free demo uses a generic 200-snippet slice just to exercise the pipeline end to end. Answer quality and citation relevance improve a lot with a larger, topic-focused corpus and a real LLM — see below.
 
 ---
 
@@ -113,19 +113,19 @@ streamlit run app.py    # ask questions, get cited answers
 python evaluate.py      # ragas + accuracy → data/eval_results.csv + eval_chart.png
 ```
 
-Backends are swappable entirely via `.env`:
+Backends are swappable via `.env`:
 
-| Variable        | Options                          | Notes                                            |
-| --------------- | -------------------------------- | ------------------------------------------------ |
-| `EMBED_BACKEND` | `openai` \| `local`              | local = free MiniLM on CPU                        |
-| `LLM_BACKEND`   | `openai` \| `anthropic` \| `none`| `none` = free extractive demo, no API call        |
-| `QDRANT_LOCAL`  | `1` \| (unset)                   | `1` = on-disk Qdrant; else Qdrant Cloud via URL/key |
+| Variable        | Options                                      | Notes                                            |
+| --------------- | -------------------------------------------- | ------------------------------------------------ |
+| `EMBED_BACKEND` | `openai` \| `local`                          | local = free MiniLM on CPU                        |
+| `LLM_BACKEND`   | `openai` \| `anthropic` \| `gemini` \| `none`| `none` = free extractive demo, no API call        |
+| `QDRANT_LOCAL`  | `1` \| (unset)                               | `1` = on-disk Qdrant; else Qdrant Cloud via URL/key |
 
 ---
 
 ## Metrics
 
-Measured with **ragas** (an LLM acts as judge to grade each answer against its retrieved context) on a deterministic sample of **PubMedQA** expert questions, plus a transparent keyword-based yes/no/maybe accuracy.
+Measured with ragas (an LLM judges each answer against its retrieved context) on a deterministic sample of PubMedQA expert questions, plus a keyword-based yes/no/maybe accuracy.
 
 | Metric                | Score        | What it checks                                              |
 | --------------------- | ------------ | ---------------------------------------------------------- |
@@ -136,15 +136,7 @@ Measured with **ragas** (an LLM acts as judge to grade each answer against its r
 
 *Measured on N = `____` PubMedQA questions (`pqa_labeled` split; default sample size 50).*
 
-> **Honest caveat:** the free demo runs on a tiny, generic **200-snippet** slice of PubMed, so out-of-the-box relevance is low by design. Faithfulness/relevancy/precision rise as you index a **larger and/or topic-focused** corpus that actually contains the answers — the free slice is for proving the pipeline, not for benchmarking quality. Run `python evaluate.py` against your own index and paste the real numbers above.
-
----
-
-## Resume bullet (template)
-
-> Built **AskBio**, a biomedical RAG system over [X] PubMed abstracts that answers questions with inline PMID citations and **abstains** when evidence is weak; combined dense (Qdrant) + BM25 retrieval via **Reciprocal Rank Fusion** and **cross-encoder reranking**, validated every cited PMID against retrieved context to eliminate hallucinated references, and measured quality with **ragas** (faithfulness [Y]). Deployed live on Streamlit Cloud + Qdrant Cloud.
-
-Fill `[X]` with your corpus size and `[Y]` with your measured faithfulness score.
+> Caveat: the free demo runs on a tiny, generic 200-snippet slice of PubMed, so out-of-the-box relevance is low. Faithfulness/relevancy/precision rise once you index a larger and/or topic-focused corpus that actually contains the answers — the free slice is for exercising the pipeline, not benchmarking quality. Run `python evaluate.py` against your own index and fill in the real numbers above.
 
 ---
 

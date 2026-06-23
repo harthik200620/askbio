@@ -1,8 +1,8 @@
-# DEPLOY.md — Ship AskBio to a Live Public URL
+# DEPLOY.md — Deploy AskBio to a public URL
 
-This walks you from a working local repo to a **public Streamlit URL** backed by **Qdrant Cloud** and **OpenAI**, and it's honest about the two non-obvious parts: the cloud app *queries* an index it does not build, and the BM25 index is a local file that has to ship with the app.
+This walks from a working local repo to a public Streamlit URL backed by Qdrant Cloud and OpenAI. Two parts aren't obvious: the cloud app *queries* an index it does not build, and the BM25 index is a local file that has to ship with the app.
 
-> Mental model: **you build the indexes locally → push vectors to Qdrant Cloud → commit the small BM25 pickle + corpus → Streamlit Cloud runs only fast read queries.** The hosted app never ingests or embeds the corpus itself.
+> Mental model: build the indexes locally, push vectors to Qdrant Cloud, commit the small BM25 pickle + corpus, and Streamlit Cloud runs only fast read queries. The hosted app never ingests or embeds the corpus itself.
 
 ---
 
@@ -92,7 +92,7 @@ git push
 
 **Option B — rebuild BM25 on first load from a committed corpus.** Commit only `data/corpus.jsonl` (smaller than the pickle) and have the app build the BM25 index once on startup from it, cached with `st.cache_resource`. This keeps the repo lighter but adds a one-time build on the first cold start. (Option A is simpler; use B if the pickle is the size problem.)
 
-> Be honest in interviews about this trade-off: hosting a full 100k hybrid index isn't free, so the **live demo deliberately uses a smaller, topic-focused corpus**. The architecture is identical to the full system — only the corpus size differs.
+> Worth noting the trade-off: hosting a full 100k hybrid index isn't free, so the live demo deliberately uses a smaller, topic-focused corpus. The architecture is identical to the full system — only the corpus size differs.
 
 ---
 
@@ -130,7 +130,7 @@ Notes:
 
 ## Step 6 — Free-tier idle sleep (and a keep-alive)
 
-Both free tiers sleep when idle, which can make a "live" demo look broken to a recruiter who clicks a cold link:
+Both free tiers sleep when idle, which can make a live demo look broken to someone clicking a cold link:
 
 - **Qdrant Cloud (free):** an idle free cluster is **terminated after ~1 week** of inactivity — if that happens you'd need to recreate the cluster and re-run Step 2. Log in periodically (or run a query) to keep it alive.
 - **Streamlit Community Cloud:** apps **go to sleep** after a period of inactivity and cold-start on the next visit (slow first load while it reinstalls/warms up).

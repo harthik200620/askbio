@@ -1,14 +1,8 @@
 """
-AskBio - Streamlit web app (Phase 6).
+AskBio - Streamlit front end. Takes a question, runs retrieve() then
+generate_answer(), and shows the grounded answer with its PubMed citations.
 
-Ties the whole pipeline together for a human:
-
-    question -> retrieve.retrieve()  ->  generate.generate_answer()
-             -> show the grounded answer + expandable PubMed citations
-
-Run locally:   streamlit run app.py
-Heavy objects (models, indexes) are cached with st.cache_resource so they load
-once per session instead of on every interaction.
+    streamlit run app.py
 """
 from __future__ import annotations
 
@@ -19,10 +13,8 @@ import config
 st.set_page_config(page_title="AskBio - biomedical RAG", page_icon="🧬", layout="centered")
 
 
-# --------------------------------------------------------------------------- #
-# Cached pipeline handles (imported lazily so Streamlit reloads stay fast and
-# any import error shows up inside the app instead of a blank screen).
-# --------------------------------------------------------------------------- #
+# cache_resource keeps the models/indexes loaded once instead of rebuilding them
+# on every rerun. Imports are inside so a load error surfaces in the app.
 @st.cache_resource(show_spinner=False)
 def _pipeline():
     import retrieve
@@ -30,9 +22,6 @@ def _pipeline():
     return retrieve.retrieve, generate.generate_answer
 
 
-# --------------------------------------------------------------------------- #
-# Header + sidebar
-# --------------------------------------------------------------------------- #
 st.title("🧬 AskBio")
 st.caption(
     "Answers biomedical questions from real PubMed research - with citations - "
@@ -54,12 +43,8 @@ with st.sidebar:
     )
 
 
-# --------------------------------------------------------------------------- #
-# Query form
-# --------------------------------------------------------------------------- #
 EXAMPLE = "What is the link between the gut microbiome and immunity?"
-# A form batches the text input with the submit click, so the question and the
-# button press arrive together (and the user can just press Enter to submit).
+# Using a form so the input and submit arrive together (Enter submits too).
 with st.form("ask_form"):
     question = st.text_input("Ask a biomedical question:", placeholder=EXAMPLE)
     ask = st.form_submit_button("Ask AskBio", type="primary")
@@ -78,7 +63,7 @@ if ask and question.strip():
 
     st.divider()
     if result["abstained"]:
-        st.warning(result["answer"])  # the honest "I don't know" path
+        st.warning(result["answer"])  # abstained -> show it as a warning
     else:
         st.markdown(result["answer"])
 

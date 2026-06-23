@@ -1,12 +1,6 @@
-"""
-AskBio - shared data shapes (the 'contract' every module agrees on).
+"""Shared data shapes passed between modules.
 
-TypedDicts keep things lightweight and readable while documenting exactly what a
-Snippet / Passage / AnswerResult looks like as data flows through the pipeline:
-
-    ingest.py      -> Snippet      (raw cleaned chunk + PMID)
-    retrieve.py    -> Passage      (a Snippet + a relevance score)
-    generate.py    -> AnswerResult (answer text + verified citations)
+ingest -> Snippet, retrieve -> Passage, generate -> AnswerResult.
 """
 from __future__ import annotations
 
@@ -14,20 +8,20 @@ from typing import List, TypedDict
 
 
 class Snippet(TypedDict):
-    """One chunk of PubMed text (ingest.py output, stored in corpus.jsonl)."""
-    id: str          # unique id for this chunk
-    pmid: str        # PubMed ID, used to build the citation link
-    title: str       # article title (may be "")
-    text: str        # the snippet text used for retrieval + answering
+    """One chunk of PubMed text (stored in corpus.jsonl)."""
+    id: str
+    pmid: str        # used to build the citation link
+    title: str       # may be ""
+    text: str
 
 
 class Passage(TypedDict):
-    """A retrieved, scored snippet handed to the LLM (a Snippet + score)."""
+    """A Snippet plus a relevance score."""
     id: str
     pmid: str
     title: str
     text: str
-    score: float     # relevance score (reranker score for the final passages)
+    score: float     # reranker score for the final passages
 
 
 class Citation(TypedDict):
@@ -37,8 +31,8 @@ class Citation(TypedDict):
 
 
 class AnswerResult(TypedDict):
-    """generate.py output: the grounded answer plus the evidence behind it."""
+    """generate.py output: the answer plus its evidence."""
     answer: str
     citations: List[Citation]
-    abstained: bool          # True if the system declined to answer
-    passages: List[Passage]  # passages actually used (for the UI + eval)
+    abstained: bool
+    passages: List[Passage]  # passages actually used (UI + eval)

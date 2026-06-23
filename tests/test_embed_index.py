@@ -1,22 +1,17 @@
-"""
-Unit tests for embed_index.py pure helpers.
+"""Stdlib-only tests for embed_index's pure helpers.
 
-These tests use ONLY the standard library and deliberately exercise the helpers
-that carry no heavy dependencies (_tokenize, _point_id, _batched). Importing
-embed_index must NOT pull in torch / openai / qdrant / rank_bm25, because those
-big libraries are imported lazily inside the functions that use them. So this
-file is a guard on that contract too: if someone moves a heavy import to module
-top-level, importing embed_index here would start failing.
+Also doubles as a guard that importing embed_index doesn't drag in
+torch/openai/qdrant/rank_bm25 -- if one of those moves to module top-level, the
+import below starts failing.
 """
 import os
 import sys
 import unittest
 
-# Make the parent package dir (where embed_index.py lives) importable when this
-# test is run from inside the tests/ folder.
+# Put the dir holding embed_index.py on the path so this runs from tests/.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import embed_index  # noqa: E402  (path tweak must precede this import)
+import embed_index  # noqa: E402
 
 
 class TestTokenize(unittest.TestCase):
@@ -24,14 +19,13 @@ class TestTokenize(unittest.TestCase):
         self.assertEqual(embed_index._tokenize("BRCA Gene"), ["brca", "gene"])
 
     def test_splits_on_punctuation_and_symbols(self):
-        # Hyphens, commas, slashes, parens -> all act as separators.
         self.assertEqual(
             embed_index._tokenize("TP53-mutant, p<0.05 (cohort/A)"),
             ["tp53", "mutant", "p", "0", "05", "cohort", "a"],
         )
 
     def test_collapses_runs_of_separators(self):
-        # Multiple spaces/punctuation in a row must not produce empty tokens.
+        # Runs of separators shouldn't leak empty tokens.
         self.assertEqual(
             embed_index._tokenize("  multiple   spaces  "),
             ["multiple", "spaces"],
@@ -49,14 +43,12 @@ class TestTokenize(unittest.TestCase):
 
 class TestPointId(unittest.TestCase):
     def test_is_deterministic_across_calls(self):
-        # Same input -> same id, every call.
         a = embed_index._point_id("snippet-123")
         b = embed_index._point_id("snippet-123")
         self.assertEqual(a, b)
 
     def test_known_stable_value(self):
-        # Pin the FNV-1a output so an accidental algorithm change is caught.
-        # (FNV-1a 64-bit of the ASCII bytes of "abc".)
+        # Pinned FNV-1a of "abc" -- catches any accidental algorithm change.
         self.assertEqual(embed_index._point_id("abc"), 16654208175385433931)
 
     def test_different_inputs_give_different_ids(self):
@@ -90,7 +82,7 @@ class TestBatched(unittest.TestCase):
         self.assertEqual(list(embed_index._batched([], 3)), [])
 
     def test_works_on_a_generator(self):
-        # _batched must not require len(); a generator input proves that.
+        # Generator input proves _batched doesn't lean on len().
         gen = (i for i in range(5))
         self.assertEqual(
             list(embed_index._batched(gen, 2)),

@@ -1,9 +1,9 @@
-# AskBio - module interfaces (the build contract)
+# AskBio — module reference
 
-Every module imports constants from `config.py` and shapes from `schemas.py`
-(`Snippet`, `Passage`, `Citation`, `AnswerResult`). **Do not redefine these.**
-Each module must be runnable as `python <module>.py` (a small CLI) where noted.
-Keep functions small and readable; comment the non-obvious parts.
+A quick map of the modules and their public functions. Each module imports
+constants from `config.py` and the shared dataclasses from `schemas.py`
+(`Snippet`, `Passage`, `Citation`, `AnswerResult`) rather than redefining them.
+Most modules also run standalone as `python <module>.py` (a small CLI) where noted.
 
 ## ingest.py  - Phase 1
 - `load_corpus(limit: int = config.CORPUS_SUBSET_SIZE) -> list[Snippet]`
@@ -45,8 +45,8 @@ Keep functions small and readable; comment the non-obvious parts.
   PMIDs inline as `[PMID:1234]`, (c) returns `config.ABSTAIN_MESSAGE`
   (`abstained=True`) when the passages don't support an answer. Parse citations
   and **verify** each cited PMID is among the provided passages (drop invalid
-  ones). LLM via `config.LLM_BACKEND` ("openai" | "anthropic" | "none"=extractive
-  demo that needs no API key).
+  ones). LLM via `config.LLM_BACKEND` ("openai" | "anthropic" | "gemini" |
+  "none"=extractive demo that needs no API key).
 - CLI: question in -> answer + citations out.
 
 ## evaluate.py  - Phase 5
@@ -58,7 +58,7 @@ Keep functions small and readable; comment the non-obvious parts.
   summary. Pin `ragas` to the 0.2.x API.
 - CLI: `run_eval()`.
 
-## app.py  - Phase 6  (written by the orchestrator)
+## app.py  - Phase 6
 Streamlit UI: question box -> `retrieve()` -> `generate_answer()` -> render the
 answer + expandable citations linking to `config.PUBMED_URL`. Cache heavy objects
 with `st.cache_resource`.

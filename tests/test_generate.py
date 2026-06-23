@@ -1,15 +1,8 @@
-"""
-Unit tests for generate.py (stdlib ``unittest`` only - NO real API calls).
+"""Unit tests for generate.py -- stdlib unittest, no network.
 
-These exercise the three interview-critical guardrails using only the pure,
-offline code paths:
-  * the grounding prompt is correctly numbered + instructed,
-  * citation validation drops hallucinated PMIDs,
-  * the offline "none" backend abstains on empty input and cites on real input.
-
-We force ``config.LLM_BACKEND = "none"`` for the backend tests so they never
-depend on the environment or reach the network. The openai/anthropic SDKs are
-imported lazily inside generate.py, so importing it here needs no extra deps.
+Covers the prompt building, citation validation (hallucinated PMIDs dropped),
+and the offline "none" backend (abstain on empty, cite on real input). Backend
+tests force config.LLM_BACKEND = "none" so they never reach an API.
 """
 from __future__ import annotations
 
@@ -26,7 +19,7 @@ from schemas import Passage
 
 
 def _passage(pmid: str, text: str, title: str = "", score: float = 1.0) -> Passage:
-    """Tiny helper to build a Passage without repeating the keys everywhere."""
+    """Build a Passage without spelling out every key."""
     return Passage(id=f"id-{pmid}", pmid=pmid, title=title, text=text, score=score)
 
 
@@ -38,26 +31,24 @@ class BuildPromptTest(unittest.TestCase):
         ]
         system, user = generate.build_prompt("What reduces fever?", passages)
 
-        # Passages are numbered [1..n] and each carries its PMID.
+        # Numbered [1..n], each tagged with its PMID, and the question is in there.
         self.assertIn("[1]", user)
         self.assertIn("[2]", user)
         self.assertIn("PMID:111", user)
         self.assertIn("PMID:222", user)
-        # The user prompt should carry the actual question.
         self.assertIn("What reduces fever?", user)
 
     def test_system_states_grounding_contract(self):
         _system, _user = generate.build_prompt("q", [_passage("1", "text")])
         system_lower = _system.lower()
-        # Grounding: "only" the passages, no outside knowledge.
+        # "only" the passages, plus the exact abstain sentence.
         self.assertIn("only", system_lower)
-        # Abstention: the exact opt-out sentence must be embedded in the system.
         self.assertIn(config.ABSTAIN_MESSAGE, _system)
 
 
 class ExtractCitationsTest(unittest.TestCase):
     def test_keeps_valid_drops_hallucinated_pmid(self):
-        # 111 is in the passages (valid); 999 is not (hallucinated -> dropped).
+        # 111 is in the passages; 999 isn't, so it should be dropped.
         passages = [_passage("111", "Some grounded fact.", title="Fever Study")]
         answer = "Aspirin helps [PMID:111]. Also unrelated [PMID:999]."
 
@@ -78,7 +69,7 @@ class ExtractCitationsTest(unittest.TestCase):
 
 class NoneBackendTest(unittest.TestCase):
     def setUp(self):
-        # Force the free offline backend so these tests never hit an API.
+        # Offline backend so these never hit an API.
         self._saved_backend = config.LLM_BACKEND
         config.LLM_BACKEND = "none"
 
@@ -96,16 +87,15 @@ class NoneBackendTest(unittest.TestCase):
         result = generate.generate_answer("How does metformin work?", passages)
 
         self.assertFalse(result["abstained"])
-        # The extractive answer must carry a real, in-context PMID tag...
+        # Answer carries the in-context PMID, and it survives validation.
         self.assertIn("[PMID:12345]", result["answer"])
-        # ...and that PMID must survive citation validation.
         self.assertEqual([c["pmid"] for c in result["citations"]], ["12345"])
-        # passages are echoed back on the result for the UI / eval.
+        # passages echoed back for the UI / eval.
         self.assertEqual(result["passages"], passages)
 
 
 class RelevanceGuardrailTest(unittest.TestCase):
-    """The relevance gate: abstain when the best passage scores below threshold."""
+    """Abstain when the best passage scores below the threshold."""
 
     def setUp(self):
         self._saved_backend = config.LLM_BACKEND
@@ -117,8 +107,7 @@ class RelevanceGuardrailTest(unittest.TestCase):
         config.RELEVANCE_THRESHOLD = self._saved_threshold
 
     def test_weak_top_score_abstains(self):
-        # Best passage scores below the threshold -> off-topic -> abstain, even
-        # though a passage exists that would otherwise be answered from.
+        # Passage exists but scores below threshold -> abstain anyway.
         config.RELEVANCE_THRESHOLD = 0.0
         passages = [_passage("111", "Unrelated abstract.", score=-5.0)]
         result = generate.generate_answer("what is dolo 650", passages)
@@ -127,7 +116,7 @@ class RelevanceGuardrailTest(unittest.TestCase):
         self.assertEqual(result["citations"], [])
 
     def test_strong_top_score_answers(self):
-        # A passage clearing the threshold is answered from normally.
+        # Clears the threshold -> answered normally.
         config.RELEVANCE_THRESHOLD = 0.0
         passages = [_passage("222", "Aspirin reduces fever and pain.", score=3.5)]
         result = generate.generate_answer("does aspirin reduce fever?", passages)

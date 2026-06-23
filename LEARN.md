@@ -1,8 +1,8 @@
-# LEARN.md — Defend AskBio in an Interview
+# LEARN.md — How AskBio works, concept by concept
 
-A concept-by-concept study guide for the AskBio RAG system. Each section gives a plain-English explanation you can say out loud, then two likely interview questions with answer hints. Read it once and you can defend every design decision in the project.
+A walkthrough of the ideas behind the AskBio RAG system. Each section gives a plain-English explanation of one piece, then a couple of common questions about it with answer notes. Useful for understanding the design decisions, or for prepping to talk through them.
 
-The big picture in one breath: **a question comes in → we retrieve the most relevant PubMed passages two different ways and fuse them (retrieval) → we rerank for precision → an LLM writes an answer using *only* those passages and cites them → we verify the citations and abstain if the evidence is weak → we measure the whole thing with ragas.**
+The big picture: a question comes in, we retrieve the most relevant PubMed passages two different ways and fuse them, rerank for precision, then an LLM writes an answer using only those passages and cites them. We verify the citations, abstain if the evidence is weak, and measure the whole thing with ragas.
 
 ---
 
@@ -121,6 +121,6 @@ AskBio deploys as three managed pieces: the Streamlit app on **Streamlit Communi
 
 ---
 
-### 60-second whiteboard recap
+### One-paragraph recap
 
-> "It's a retrieval-augmented generation system over PubMed. I retrieve candidate passages two ways — dense embeddings in Qdrant for meaning, and BM25 for exact terms — fuse them with Reciprocal Rank Fusion so I never mix incompatible score scales, then rerank the shortlist with a cross-encoder for precision. The LLM answers using only those passages and cites PMIDs inline; I validate each citation against what was actually retrieved and drop hallucinated ones, and the system abstains when the evidence is weak. I evaluate with ragas — faithfulness to isolate the generator, context metrics to isolate the retriever — plus a non-LLM accuracy on PubMedQA. Every backend is swappable via env vars, so the same code runs fully free locally or on the cloud."
+> It's a retrieval-augmented generation system over PubMed. Candidate passages come from two retrievers — dense embeddings in Qdrant for meaning, BM25 for exact terms — fused with Reciprocal Rank Fusion to avoid mixing incompatible score scales, then a cross-encoder reranks the shortlist for precision. The LLM answers using only those passages and cites PMIDs inline; each citation is validated against what was actually retrieved, hallucinated ones are dropped, and the system abstains when the evidence is weak. Evaluation uses ragas — faithfulness to isolate the generator, context metrics to isolate the retriever — plus a non-LLM accuracy on PubMedQA. Backends are swappable via env vars, so the same code runs free locally or on the cloud.

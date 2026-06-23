@@ -1,42 +1,12 @@
-"""
-AskBio - Phase 4: grounded answer generation (with citations + abstention).
+"""Grounded answer generation: ask an LLM to answer from the retrieved passages
+only, cite the PMIDs that back each claim, and abstain when the passages don't
+cover the question (a wrong biomedical answer is worse than "I don't know").
 
-Plain-English idea
-------------------
-This is the part of the RAG system that actually *answers*. Given a user's
-question and the handful of passages retrieval found, it asks an LLM to write a
-short answer that is **grounded** - i.e. built ONLY from those passages, never
-from the model's own background knowledge - and to cite the PubMed IDs (PMIDs)
-that back each claim inline as ``[PMID:1234]``. If the passages don't actually
-contain the answer, the model is told to say so verbatim (``config.ABSTAIN_MESSAGE``)
-rather than guess. In a biomedical setting a confident-but-wrong answer is worse
-than "I don't know", so abstention is a feature, not a failure.
-
-Why this matters (the three guardrails)
----------------------------------------
-1. **Grounding prompt** - the system instruction forbids outside knowledge and
-   pins every answer to the numbered passages. This is the first line of defence
-   against hallucination.
-2. **Citation validation** - LLMs sometimes cite a plausible-looking PMID that
-   was never in the context. After generation we regex out every ``[PMID:xxxx]``
-   token and *drop any PMID that is not among the passages we actually supplied*.
-   A citation the user can click but that doesn't support the claim is worse than
-   none, so we only keep verifiable ones. This is the citation-validity guardrail.
-3. **Abstention** - we surface an explicit ``abstained`` flag (the answer equals
-   ``config.ABSTAIN_MESSAGE``, or the offline backend had no passages) so the UI
-   and the evaluator can treat "declined to answer" distinctly from a real answer.
-
-Backends (``config.LLM_BACKEND``)
----------------------------------
-- ``"openai"`` / ``"anthropic"`` - real chat completions.
-- ``"none"`` - a free, no-API **extractive demo**: it stitches an answer out of
-  the top passages' own text and appends their PMID tags. This lets the entire
-  app run end-to-end at $0 with no key.
-
-The ``openai`` / ``anthropic`` SDKs are imported *lazily inside their backend
-functions* so this module - and all of its pure logic (prompt building, citation
-parsing/validation, the offline backend) - imports and unit-tests cleanly with
-neither library installed and no API key set.
+Backends are dispatched on config.LLM_BACKEND. The "none" backend is a free,
+no-key fallback that just quotes the top passages back with their PMID tags;
+"gemini" is the free-via-AI-Studio way to get actual synthesised prose. The
+openai/anthropic/gemini SDKs are imported inside their backend functions, so
+this module and its pure logic import fine with none of them installed.
 """
 from __future__ import annotations
 
@@ -46,30 +16,16 @@ from typing import List
 import config
 from schemas import AnswerResult, Citation, Passage
 
-# Matches an inline citation token like ``[PMID:12345]`` and captures the digits.
-# Case-insensitive and whitespace-tolerant so we still catch ``[ pmid: 123 ]``.
+# Citation token like [PMID:12345], whitespace-tolerant so "[ pmid: 123 ]" matches too.
 _CITATION_RE = re.compile(r"\[\s*PMID\s*:\s*(\d+)\s*\]", re.IGNORECASE)
 
 
-# --------------------------------------------------------------------------- #
-# Prompt building (pure - no API, no I/O)
-# --------------------------------------------------------------------------- #
 def build_prompt(query: str, passages: List[Passage]) -> tuple[str, str]:
+    """Build the (system, user) prompt for a grounded, cited answer.
+
+    Passages are numbered [1..n] and PMID-tagged so the model has a stable handle
+    to cite. The system message spells out the grounding contract verbatim.
     """
-    Build the ``(system, user)`` prompt pair for a grounded, cited answer.
-
-    Passages are numbered ``[1..n]`` and each is tagged with its PMID, e.g.::
-
-        [1] (PMID:12345) <text>
-
-    The number gives the model a stable handle to reason about; the PMID is what
-    it must echo back in ``[PMID:xxxx]`` citations. The system message states the
-    grounding contract (answer only from the passages, cite PMIDs, abstain with
-    an exact phrase, no outside knowledge) - that wording is the primary
-    anti-hallucination guardrail, so it is deliberately explicit.
-    """
-    # One numbered, PMID-tagged line per passage. The PMID appears both so the
-    # model can cite it and so a human reading the prompt can audit grounding.
     numbered = "\n".join(
         f"[{i}] (PMID:{p['pmid']}) {p['text']}"
         for i, p in enumerate(passages, start=1)
@@ -93,20 +49,15 @@ def build_prompt(query: str, passages: List[Passage]) -> tuple[str, str]:
     return system, user
 
 
-# --------------------------------------------------------------------------- #
-# Citation parsing + validation (pure - the citation-validity guardrail)
-# --------------------------------------------------------------------------- #
 def extract_citations(answer: str, passages: List[Passage]) -> List[Citation]:
-    """
-    Pull ``[PMID:xxxx]`` tokens out of ``answer`` and keep only the *valid* ones.
+    """Pull [PMID:xxxx] tokens out of the answer, keeping only PMIDs that were
+    actually in the passages.
 
-    "Valid" means the PMID was actually among the passages we handed the model:
-    anything else is a hallucinated citation and is dropped. We de-duplicate
-    while preserving first-mention order, and look up each kept PMID's title from
-    its passage so the UI can show a human-readable, clickable reference.
+    Validating against the passages drops PMIDs the model hallucinated -- a
+    clickable citation that doesn't support the claim is worse than none. Dupes
+    are removed, first mention wins, and the title comes from the passage.
     """
-    # Map PMID -> title for fast membership tests and title lookup. If the same
-    # PMID appears twice, the first passage's title wins (consistent + cheap).
+    # PMID -> title; first passage wins if a PMID repeats.
     pmid_to_title = {}
     for p in passages:
         pmid_to_title.setdefault(p["pmid"], p["title"])
@@ -115,7 +66,7 @@ def extract_citations(answer: str, passages: List[Passage]) -> List[Citation]:
     seen: set[str] = set()
     for match in _CITATION_RE.finditer(answer):
         pmid = match.group(1)
-        # Guardrail: skip PMIDs not in context (hallucinated) and repeats.
+        # Skip hallucinated PMIDs (not in context) and repeats.
         if pmid not in pmid_to_title or pmid in seen:
             continue
         seen.add(pmid)
@@ -129,26 +80,19 @@ def extract_citations(answer: str, passages: List[Passage]) -> List[Citation]:
     return citations
 
 
-# --------------------------------------------------------------------------- #
-# Backends
-# --------------------------------------------------------------------------- #
 def _generate_none(passages: List[Passage]) -> str:
-    """
-    Offline, no-API **extractive** answer (the free ``"none"`` backend).
+    """Free offline backend: quote the top 1-2 passages back with their PMID tags.
 
-    With no LLM available we can't synthesise prose, so we do the honest minimum:
-    quote the top 1-2 passages' text back and append their ``[PMID:xxxx]`` tags.
-    This keeps the same grounded+cited *shape* as a real answer (so the rest of
-    the app and the tests exercise the real code path) while costing nothing.
-    Empty passages -> abstain, because there is genuinely nothing to answer from.
+    No LLM, so we can't synthesise prose -- but the answer keeps the same
+    grounded+cited shape as a real one, so the rest of the app and the tests run
+    unchanged. No passages means nothing to answer from, so abstain.
     """
     if not passages:
         return config.ABSTAIN_MESSAGE
 
     parts: List[str] = []
-    for p in passages[:2]:  # top 1-2 passages keep the demo answer short
+    for p in passages[:2]:
         snippet = p["text"].strip()
-        # Trim to a sentence-ish length so the demo answer stays readable.
         if len(snippet) > 300:
             snippet = snippet[:300].rstrip() + "..."
         parts.append(f"{snippet} [PMID:{p['pmid']}]")
@@ -156,8 +100,8 @@ def _generate_none(passages: List[Passage]) -> str:
 
 
 def _generate_openai(system: str, user: str) -> str:
-    """Call OpenAI chat completions. SDK imported lazily so import stays cheap."""
-    from openai import OpenAI  # lazy: only needed for this backend
+    """OpenAI chat completions backend."""
+    from openai import OpenAI
 
     client = OpenAI(api_key=config.OPENAI_API_KEY)
     response = client.chat.completions.create(
@@ -166,37 +110,31 @@ def _generate_openai(system: str, user: str) -> str:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=0,  # deterministic, grounded answers - no creative drift
+        temperature=0,  # keep it deterministic
     )
     return (response.choices[0].message.content or "").strip()
 
 
 def _generate_anthropic(system: str, user: str) -> str:
-    """Call the Anthropic Messages API. SDK imported lazily."""
-    import anthropic  # lazy: only needed for this backend
+    """Anthropic Messages backend."""
+    import anthropic
 
     client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
     response = client.messages.create(
         model=config.ANTHROPIC_LLM_MODEL,
         max_tokens=1024,
-        system=system,  # Anthropic takes the system prompt as a top-level arg
+        system=system,  # system prompt is a top-level arg here, not a message
         messages=[{"role": "user", "content": user}],
         temperature=0,
     )
-    # Messages return a list of content blocks; concatenate the text ones.
+    # Response is a list of content blocks; keep the text ones.
     text = "".join(block.text for block in response.content if block.type == "text")
     return text.strip()
 
 
 def _generate_gemini(system: str, user: str) -> str:
-    """Call Google Gemini (2.5 Flash by default). SDK imported lazily.
-
-    Uses the google-genai SDK: the grounding contract goes in ``system_instruction``
-    and the numbered passages in ``contents``. Free via Google AI Studio, which is
-    why this is the recommended no-cost way to get *synthesised* (not just quoted)
-    answers.
-    """
-    from google import genai  # lazy: only needed for this backend
+    """Google Gemini backend (google-genai SDK). Free via Google AI Studio."""
+    from google import genai
     from google.genai import types
 
     client = genai.Client(api_key=config.GEMINI_API_KEY)
@@ -205,23 +143,17 @@ def _generate_gemini(system: str, user: str) -> str:
         contents=user,
         config=types.GenerateContentConfig(
             system_instruction=system,
-            temperature=0.0,  # deterministic, grounded answers
+            temperature=0.0,
         ),
     )
     return (response.text or "").strip()
 
 
-# --------------------------------------------------------------------------- #
-# Relevance guardrail (pure)
-# --------------------------------------------------------------------------- #
 def _passages_too_weak(passages: List[Passage]) -> bool:
-    """
-    True when retrieval found nothing usable: no passages at all, or the best
-    reranked passage scores below ``config.RELEVANCE_THRESHOLD``.
-
-    The reranker's score is our relevance signal, so this makes AskBio abstain on
-    off-topic questions instead of answering from passages that don't actually
-    match. Default threshold is effectively off (-1e9); the demo .env raises it.
+    """True when there are no passages, or the best rerank score is below
+    config.RELEVANCE_THRESHOLD -- lets us abstain on off-topic questions instead
+    of answering from passages that don't match. Threshold defaults to off
+    (-1e9); the demo .env raises it.
     """
     if not passages:
         return True
@@ -229,21 +161,13 @@ def _passages_too_weak(passages: List[Passage]) -> bool:
     return top_score < config.RELEVANCE_THRESHOLD
 
 
-# --------------------------------------------------------------------------- #
-# Public entry point
-# --------------------------------------------------------------------------- #
 def generate_answer(query: str, passages: List[Passage]) -> AnswerResult:
-    """
-    Produce a grounded ``AnswerResult`` for ``query`` over ``passages``.
+    """Produce a grounded AnswerResult for the query.
 
-    Dispatches on ``config.LLM_BACKEND`` to get the raw answer text, then applies
-    the two post-hoc guardrails uniformly across every backend:
-      * validate citations (drop PMIDs not in the passages), and
-      * compute ``abstained`` (True when the answer is the abstain message, or
-        the offline backend had no passages to work from).
+    Dispatches on config.LLM_BACKEND for the raw text, then validates citations
+    and sets the abstained flag the same way for every backend.
     """
-    # Relevance guardrail (every backend): abstain up front when retrieval is too
-    # weak, rather than answering from passages that don't match the question.
+    # Bail out before calling any backend if retrieval is too weak.
     if _passages_too_weak(passages):
         return AnswerResult(
             answer=config.ABSTAIN_MESSAGE,
@@ -255,10 +179,8 @@ def generate_answer(query: str, passages: List[Passage]) -> AnswerResult:
     backend = config.LLM_BACKEND
 
     if backend == "none":
-        # Offline demo path: build the answer straight from passage text.
         answer = _generate_none(passages)
     else:
-        # Real LLM path: build the grounded prompt, then call the chosen SDK.
         system, user = build_prompt(query, passages)
         if backend == "openai":
             answer = _generate_openai(system, user)
@@ -274,9 +196,7 @@ def generate_answer(query: str, passages: List[Passage]) -> AnswerResult:
 
     citations = extract_citations(answer, passages)
 
-    # Abstained when the model returned the exact opt-out phrase, or the offline
-    # backend had nothing to answer from. Compare trimmed so trailing whitespace
-    # from an SDK never hides a genuine abstention.
+    # Trim before comparing so trailing whitespace from an SDK doesn't hide an abstention.
     abstained = answer.strip() == config.ABSTAIN_MESSAGE.strip() or (
         backend == "none" and not passages
     )
@@ -289,11 +209,8 @@ def generate_answer(query: str, passages: List[Passage]) -> AnswerResult:
     )
 
 
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
 def _main() -> None:
-    """CLI: ``python generate.py "a question"`` -> retrieve, answer, cite."""
+    """CLI: python generate.py "a question" -> retrieve, answer, cite."""
     import sys
 
     if len(sys.argv) < 2:
@@ -302,8 +219,8 @@ def _main() -> None:
 
     query = sys.argv[1]
 
-    # Lazy import: retrieve.py pulls in heavy ML deps (Qdrant, rerankers); we only
-    # want them for the live CLI, not when this module is imported for its logic.
+    # Imported here, not at module top: retrieve pulls in heavy ML deps (Qdrant,
+    # rerankers) we don't want just to import this module's logic.
     import retrieve
 
     passages = retrieve.retrieve(query)

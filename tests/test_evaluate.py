@@ -1,12 +1,7 @@
 """
-Standard-library-only tests for evaluate.py.
-
-These never touch the network, an LLM, ragas, datasets, or matplotlib: they
-exercise the two pure helpers that carry the eval's logic -
-``predict_label`` (free-text answer -> yes/no/maybe/unknown) and
-``compute_accuracy`` (scoring over (predicted, gold) pairs). Importing
-``evaluate`` is safe with nothing but the stdlib + config installed because all
-heavy deps are imported lazily inside the functions that use them. Run with::
+Stdlib-only tests for the two pure helpers in evaluate.py (predict_label and
+compute_accuracy). No network/LLM/ragas/datasets/matplotlib -- importing
+evaluate is safe because its heavy deps are imported lazily.
 
     python -m unittest tests.test_evaluate      # from the askbio/ folder
 """
@@ -16,14 +11,13 @@ import sys
 import unittest
 from pathlib import Path
 
-# Make the askbio/ package root importable when run as a bare file.
+# Make askbio/ importable when this file is run directly.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import evaluate  # noqa: E402  (path tweak must happen before this import)
 
 
 class TestPredictLabel(unittest.TestCase):
-    """predict_label must read a yes/no/maybe verdict out of free text."""
 
     def test_clear_yes(self):
         self.assertEqual(evaluate.predict_label("Yes, the treatment is effective."), "yes")
@@ -32,7 +26,6 @@ class TestPredictLabel(unittest.TestCase):
         self.assertEqual(evaluate.predict_label("No, there is no such association."), "no")
 
     def test_clear_maybe_from_hedge(self):
-        # Hedging language maps to the "maybe" class.
         self.assertEqual(
             evaluate.predict_label("The evidence is inconclusive and unclear."), "maybe"
         )
@@ -41,7 +34,6 @@ class TestPredictLabel(unittest.TestCase):
         self.assertEqual(evaluate.predict_label("Maybe, more study is needed."), "maybe")
 
     def test_abstain_answer_is_unknown(self):
-        # The system's abstain message must NOT be scored as a real verdict.
         self.assertEqual(evaluate.predict_label(evaluate.config.ABSTAIN_MESSAGE), "unknown")
 
     def test_empty_answer_is_unknown(self):
@@ -49,32 +41,27 @@ class TestPredictLabel(unittest.TestCase):
         self.assertEqual(evaluate.predict_label("   "), "unknown")
 
     def test_no_signal_is_unknown(self):
-        # A sentence with no yes/no/maybe signal is unscoreable.
         self.assertEqual(
             evaluate.predict_label("The study enrolled 200 patients across three sites."),
             "unknown",
         )
 
     def test_hedge_beats_stray_yes(self):
-        # "maybe"-type hedging takes priority over an incidental "yes".
         self.assertEqual(
             evaluate.predict_label("Yes in some cases, but results are uncertain."), "maybe"
         )
 
     def test_earliest_verdict_wins_when_both_present(self):
-        # When both "yes" and "no" appear (and no hedge), the earlier one wins.
         self.assertEqual(
             evaluate.predict_label("No clear benefit, though yes for a subgroup."), "no"
         )
 
     def test_word_boundary_avoids_false_positive(self):
-        # "another" contains "no" but must not be read as a "no" verdict, and
-        # there is no real verdict here -> unknown.
+        # "another" contains "no" but isn't a verdict.
         self.assertEqual(evaluate.predict_label("This is another finding entirely."), "unknown")
 
 
 class TestComputeAccuracy(unittest.TestCase):
-    """compute_accuracy scores only items where a label was predicted."""
 
     def test_all_correct(self):
         pairs = [("yes", "yes"), ("no", "no"), ("maybe", "maybe")]
@@ -85,26 +72,25 @@ class TestComputeAccuracy(unittest.TestCase):
         self.assertEqual(out["total"], 3)
 
     def test_half_correct(self):
-        pairs = [("yes", "yes"), ("no", "yes")]  # one right, one wrong
+        pairs = [("yes", "yes"), ("no", "yes")]
         out = evaluate.compute_accuracy(pairs)
         self.assertEqual(out["accuracy"], 0.5)
         self.assertEqual(out["correct"], 1)
         self.assertEqual(out["scored"], 2)
 
     def test_unknown_predictions_are_not_scored(self):
-        # "unknown" rows are excluded from the denominator, not counted wrong.
         pairs = [("yes", "yes"), ("unknown", "no"), ("unknown", "maybe")]
         out = evaluate.compute_accuracy(pairs)
-        self.assertEqual(out["scored"], 1)      # only the "yes" row is scoreable
+        self.assertEqual(out["scored"], 1)
         self.assertEqual(out["correct"], 1)
-        self.assertEqual(out["accuracy"], 1.0)  # 1/1 over scored items
+        self.assertEqual(out["accuracy"], 1.0)
         self.assertEqual(out["total"], 3)
 
     def test_no_scoreable_items_gives_zero(self):
         pairs = [("unknown", "yes"), ("unknown", "no")]
         out = evaluate.compute_accuracy(pairs)
         self.assertEqual(out["scored"], 0)
-        self.assertEqual(out["accuracy"], 0.0)  # guarded division by zero
+        self.assertEqual(out["accuracy"], 0.0)
 
     def test_empty_input(self):
         out = evaluate.compute_accuracy([])
