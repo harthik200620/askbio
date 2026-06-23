@@ -32,8 +32,8 @@ HF_EVAL = "qiaojin/PubMedQA"
 EVAL_CONFIG = "pqa_labeled"          # expert-labeled split (yes/no/maybe)
 EVAL_SAMPLE_SIZE = int(os.getenv("EVAL_SAMPLE_SIZE", "50"))
 
-# Embeddings. EMBED_BACKEND: "openai" (default) or "local" (free CPU).
-EMBED_BACKEND = os.getenv("EMBED_BACKEND", "openai").lower()
+# Embeddings. EMBED_BACKEND: "local" (default, free CPU) or "openai".
+EMBED_BACKEND = os.getenv("EMBED_BACKEND", "local").lower()
 OPENAI_EMBED_MODEL = "text-embedding-3-small"
 EMBED_DIM = 768                      # 3-small truncated to 768
 LOCAL_EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
@@ -62,9 +62,9 @@ RRF_K = 60            # RRF constant
 RERANK_TOP_K = 5      # after cross-encoder rerank
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
-# Generation. LLM_BACKEND: "openai" | "anthropic" | "gemini" | "none".
-# gemini is free via Google AI Studio; none = extractive answer, no LLM call.
-LLM_BACKEND = os.getenv("LLM_BACKEND", "openai").lower()
+# Generation. LLM_BACKEND: "gemini" (default, free via Google AI Studio) |
+# "openai" | "anthropic" | "none" (extractive answer, no LLM call).
+LLM_BACKEND = os.getenv("LLM_BACKEND", "gemini").lower()
 OPENAI_LLM_MODEL = os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini")
 ANTHROPIC_LLM_MODEL = os.getenv("ANTHROPIC_LLM_MODEL", "claude-haiku-4-5")
 GEMINI_LLM_MODEL = os.getenv("GEMINI_LLM_MODEL", "gemini-2.5-flash")
