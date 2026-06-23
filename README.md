@@ -69,7 +69,7 @@ AskBio answers biomedical questions from PubMed research (the Hugging Face `MedR
 
 ## Try it free (no API keys)
 
-The whole pipeline can run at $0: local embeddings, no LLM (extractive demo answers), on-disk Qdrant, tiny corpus.
+The whole pipeline can run with no accounts at all: local embeddings, no LLM (extractive demo answers), on-disk Qdrant, tiny corpus.
 
 ```bash
 cd askbio
@@ -138,18 +138,3 @@ Measured with ragas (an LLM judges each answer against its retrieved context) on
 
 > Caveat: the free demo runs on a tiny, generic 200-snippet slice of PubMed, so out-of-the-box relevance is low. Faithfulness/relevancy/precision rise once you index a larger and/or topic-focused corpus that actually contains the answers — the free slice is for exercising the pipeline, not benchmarking quality. Run `python evaluate.py` against your own index and fill in the real numbers above.
 
----
-
-## Cost
-
-Running the real system on a focused demo corpus is roughly **~$5 total**:
-
-| Item                         | Approx. cost                                   |
-| ---------------------------- | ---------------------------------------------- |
-| OpenAI embeddings            | ~$0.50 (one-time, to build the index)          |
-| OpenAI answers (`gpt-4o-mini`) | ~$1 (plus the ragas judge during evaluation) |
-| Qdrant Cloud free cluster    | $0 (free tier)                                 |
-| Streamlit Community Cloud    | $0 (free tier)                                 |
-| Hugging Face datasets        | $0 (read token, free)                          |
-
-And the **free demo mode** (`EMBED_BACKEND=local`, `LLM_BACKEND=none`, `QDRANT_LOCAL=1`) costs **$0** with no accounts at all.

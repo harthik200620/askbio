@@ -6,7 +6,18 @@ generate_answer(), and shows the grounded answer with its PubMed citations.
 """
 from __future__ import annotations
 
+import os
+
 import streamlit as st
+
+# On Streamlit Cloud there's no .env file -- mirror any secrets into the
+# environment so config.py (which reads os.getenv) sees QDRANT_URL, GEMINI_API_KEY,
+# etc. Locally there's no secrets file, so this is a harmless no-op.
+try:
+    for _k, _v in st.secrets.items():
+        os.environ.setdefault(_k, str(_v))
+except Exception:
+    pass
 
 import config
 
