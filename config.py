@@ -81,14 +81,18 @@ RERANK_TOP_K = 5      # final passages after cross-encoder reranking
 RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # --------------------------------------------------------------------------- #
-# Generation   (LLM_BACKEND = "openai" [spec default] | "anthropic" | "none")
-#   "none" => extractive demo answer with NO LLM call (free, for testing)
+# Generation (LLM_BACKEND = "openai" | "anthropic" | "gemini" | "none")
+#   "gemini" => Google Gemini 2.5 Flash (FREE tier via Google AI Studio)
+#   "none"   => extractive demo answer with NO LLM call (free, for testing)
 # --------------------------------------------------------------------------- #
 LLM_BACKEND = os.getenv("LLM_BACKEND", "openai").lower()
 OPENAI_LLM_MODEL = os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini")
 ANTHROPIC_LLM_MODEL = os.getenv("ANTHROPIC_LLM_MODEL", "claude-haiku-4-5")
+GEMINI_LLM_MODEL = os.getenv("GEMINI_LLM_MODEL", "gemini-2.5-flash")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+# Google AI Studio key (free tier); accept either common env var name.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
 
 ABSTAIN_MESSAGE = "I don't have enough information in the literature to answer that."
 PUBMED_URL = "https://pubmed.ncbi.nlm.nih.gov/{pmid}/"

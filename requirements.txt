@@ -3,6 +3,7 @@
 # ---- core pipeline ----
 openai>=1.40,<2              # embeddings + gpt-4o-mini answers (langchain-openai needs <2)
 anthropic>=0.40              # optional Claude backend for answers
+google-genai>=1.0            # optional Gemini 2.5 Flash backend (free via AI Studio)
 qdrant-client>=1.11          # vector database client
 datasets>=2.20               # download PubMed corpus + PubMedQA from Hugging Face
 rank-bm25>=0.2.2             # keyword (BM25) half of hybrid retrieval

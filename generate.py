@@ -188,6 +188,29 @@ def _generate_anthropic(system: str, user: str) -> str:
     return text.strip()
 
 
+def _generate_gemini(system: str, user: str) -> str:
+    """Call Google Gemini (2.5 Flash by default). SDK imported lazily.
+
+    Uses the google-genai SDK: the grounding contract goes in ``system_instruction``
+    and the numbered passages in ``contents``. Free via Google AI Studio, which is
+    why this is the recommended no-cost way to get *synthesised* (not just quoted)
+    answers.
+    """
+    from google import genai  # lazy: only needed for this backend
+    from google.genai import types
+
+    client = genai.Client(api_key=config.GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model=config.GEMINI_LLM_MODEL,
+        contents=user,
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            temperature=0.0,  # deterministic, grounded answers
+        ),
+    )
+    return (response.text or "").strip()
+
+
 # --------------------------------------------------------------------------- #
 # Relevance guardrail (pure)
 # --------------------------------------------------------------------------- #
@@ -241,10 +264,12 @@ def generate_answer(query: str, passages: List[Passage]) -> AnswerResult:
             answer = _generate_openai(system, user)
         elif backend == "anthropic":
             answer = _generate_anthropic(system, user)
+        elif backend == "gemini":
+            answer = _generate_gemini(system, user)
         else:
             raise ValueError(
                 f"Unknown LLM_BACKEND {backend!r}; expected "
-                "'openai', 'anthropic', or 'none'."
+                "'openai', 'anthropic', 'gemini', or 'none'."
             )
 
     citations = extract_citations(answer, passages)
