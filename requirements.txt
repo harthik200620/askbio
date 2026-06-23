@@ -1,0 +1,22 @@
+# AskBio dependencies (Python 3.11)
+
+# ---- core pipeline ----
+openai>=1.40                 # embeddings + gpt-4o-mini answers
+anthropic>=0.40              # optional Claude backend for answers
+qdrant-client>=1.11          # vector database client
+datasets>=2.20               # download PubMed corpus + PubMedQA from Hugging Face
+rank-bm25>=0.2.2             # keyword (BM25) half of hybrid retrieval
+sentence-transformers>=3.0   # cross-encoder reranker (pulls torch, runs on CPU)
+numpy>=1.26
+pandas>=2.2
+python-dotenv>=1.0           # load secrets from .env
+
+# ---- evaluation ----
+ragas>=0.2,<0.3              # pinned to the stable 0.2.x line (see LEARN.md for why)
+matplotlib>=3.8             # eval bar chart
+
+# ---- web app ----
+streamlit>=1.36
+
+# ---- dev / test ----
+pytest>=8.0
