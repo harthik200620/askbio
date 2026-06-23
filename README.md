@@ -45,7 +45,7 @@ AskBio answers biomedical questions from PubMed research (the Hugging Face `MedR
 - **Grounded answers with validated citations** — the prompt forbids outside knowledge and ties every claim to the numbered passages. After generation, each `[PMID:xxxx]` token is regex-extracted and checked against the passages actually retrieved; any PMID the model invented is dropped. A clickable citation that doesn't support its claim is worse than none.
 - **Abstention guardrail** — if the passages don't support an answer, the model returns a fixed opt-out phrase and the app flags `abstained` and shows it as a warning. This is the main anti-hallucination mechanism.
 - **Evaluation** — ragas (LLM-judged) scores faithfulness, answer relevancy, and context precision on a PubMedQA sample, alongside a plain keyword-based yes/no/maybe accuracy. Outputs a CSV and a bar chart.
-- **Deployable** — Streamlit Community Cloud (app) + Qdrant Cloud (vector DB) + OpenAI (embeddings + answers). See `DEPLOY.md`.
+- **Deployable** — Streamlit Community Cloud (app) + Qdrant Cloud (vector DB) + OpenAI/Gemini (embeddings + answers).
 
 ---
 

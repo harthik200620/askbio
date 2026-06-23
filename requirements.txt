@@ -13,7 +13,7 @@ pandas>=2.2
 python-dotenv>=1.0           # load secrets from .env
 
 # ---- evaluation ----
-# ragas 0.2.x is the stable, well-documented line (see LEARN.md). It targets the
+# ragas 0.2.x is the stable, well-documented line. It targets the
 # langchain 0.3.x API; newer langchain 1.x removed modules ragas imports
 # (langchain_community.chat_models.vertexai), so the langchain stack is pinned to
 # 0.3.x here to keep `import ragas` working.
