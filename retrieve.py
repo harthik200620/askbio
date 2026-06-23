@@ -70,20 +70,60 @@ def dense_search(query: str, top_k: int = config.DENSE_TOP_K) -> list[Passage]:
     return passages
 
 
-def _load_bm25_bundle() -> dict:
-    """Load (once) the BM25 bundle pickled by embed_index.py.
+def _build_bm25_from_qdrant() -> dict:
+    """Build the BM25 bundle from the Qdrant collection's payloads.
 
-    Dict of {"bm25", "ids", "meta"}: the fitted rank_bm25 model, the corpus ids
-    in scoring order, and the per-id snippet fields so we can rebuild a Passage
-    without re-reading the corpus.
+    Used when there's no local bm25.pkl - e.g. on a deploy, where the pickle is
+    gitignored. Qdrant already stores each snippet's text in its payload, so we
+    scroll the whole collection once and build BM25 from that. Nothing to ship.
+    """
+    from rank_bm25 import BM25Okapi
+    import embed_index
+
+    client = embed_index.get_qdrant_client()
+    ids: list[str] = []
+    meta: dict[str, dict] = {}
+    tokenized: list[list[str]] = []
+
+    offset = None
+    while True:
+        points, offset = client.scroll(
+            collection_name=config.QDRANT_COLLECTION,
+            limit=1000,
+            offset=offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for point in points:
+            payload = point.payload or {}
+            doc_id = str(payload.get("id", point.id))
+            ids.append(doc_id)
+            meta[doc_id] = {
+                "pmid": str(payload.get("pmid", "")),
+                "title": payload.get("title", "") or "",
+                "text": payload.get("text", "") or "",
+            }
+            tokenized.append(_tokenize(meta[doc_id]["text"]))
+        if offset is None:  # scroll returns None for the offset when fully paged
+            break
+
+    return {"bm25": BM25Okapi(tokenized), "ids": ids, "meta": meta}
+
+
+def _load_bm25_bundle() -> dict:
+    """Load the BM25 bundle once. Prefer the pickle embed_index.py writes locally;
+    if it's missing (e.g. on a deploy with only Qdrant), rebuild it from the
+    collection's payloads instead.
     """
     global _BM25_BUNDLE
     if _BM25_BUNDLE is None:
-        import pickle
+        if config.BM25_PATH.exists():
+            import pickle
 
-        # Unpickling the model needs rank_bm25 importable.
-        with open(config.BM25_PATH, "rb") as fh:
-            _BM25_BUNDLE = pickle.load(fh)
+            with open(config.BM25_PATH, "rb") as fh:
+                _BM25_BUNDLE = pickle.load(fh)
+        else:
+            _BM25_BUNDLE = _build_bm25_from_qdrant()
     return _BM25_BUNDLE
 
 
