@@ -104,5 +104,36 @@ class NoneBackendTest(unittest.TestCase):
         self.assertEqual(result["passages"], passages)
 
 
+class RelevanceGuardrailTest(unittest.TestCase):
+    """The relevance gate: abstain when the best passage scores below threshold."""
+
+    def setUp(self):
+        self._saved_backend = config.LLM_BACKEND
+        self._saved_threshold = config.RELEVANCE_THRESHOLD
+        config.LLM_BACKEND = "none"
+
+    def tearDown(self):
+        config.LLM_BACKEND = self._saved_backend
+        config.RELEVANCE_THRESHOLD = self._saved_threshold
+
+    def test_weak_top_score_abstains(self):
+        # Best passage scores below the threshold -> off-topic -> abstain, even
+        # though a passage exists that would otherwise be answered from.
+        config.RELEVANCE_THRESHOLD = 0.0
+        passages = [_passage("111", "Unrelated abstract.", score=-5.0)]
+        result = generate.generate_answer("what is dolo 650", passages)
+        self.assertTrue(result["abstained"])
+        self.assertEqual(result["answer"], config.ABSTAIN_MESSAGE)
+        self.assertEqual(result["citations"], [])
+
+    def test_strong_top_score_answers(self):
+        # A passage clearing the threshold is answered from normally.
+        config.RELEVANCE_THRESHOLD = 0.0
+        passages = [_passage("222", "Aspirin reduces fever and pain.", score=3.5)]
+        result = generate.generate_answer("does aspirin reduce fever?", passages)
+        self.assertFalse(result["abstained"])
+        self.assertIn("[PMID:222]", result["answer"])
+
+
 if __name__ == "__main__":
     unittest.main()

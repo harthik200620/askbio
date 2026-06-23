@@ -94,6 +94,23 @@ ABSTAIN_MESSAGE = "I don't have enough information in the literature to answer t
 PUBMED_URL = "https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
 
 # --------------------------------------------------------------------------- #
+# Topic focus + relevance guardrail
+# --------------------------------------------------------------------------- #
+# Optional topic focus: when set (space/comma-separated keywords), ingest keeps
+# only snippets mentioning ANY keyword - a focused corpus answers far better than
+# a random slice. Empty = take the first CORPUS_SUBSET_SIZE snippets (spec default).
+CORPUS_TOPIC = os.getenv("CORPUS_TOPIC", "")
+# When filtering by topic, cap how many raw rows to stream while hunting for
+# matches (bounds the one-time scan). 0 = no cap.
+CORPUS_SCAN_LIMIT = int(os.getenv("CORPUS_SCAN_LIMIT", "0"))
+
+# Relevance guardrail: if the best reranked passage scores below this
+# (RERANK_MODEL cross-encoder score), the system abstains instead of answering
+# from weak matches. Default effectively off (-1e9); the demo .env raises it.
+RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "-1e9"))
+
+
+# --------------------------------------------------------------------------- #
 # Misc
 # --------------------------------------------------------------------------- #
 HF_TOKEN = os.getenv("HF_TOKEN", "")

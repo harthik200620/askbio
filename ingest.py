@@ -51,6 +51,20 @@ def _first_nonempty(*values: object) -> str:
     return ""
 
 
+def _topic_keywords() -> list[str]:
+    """Lowercased keywords from config.CORPUS_TOPIC (comma/space separated)."""
+    return [w.lower() for w in config.CORPUS_TOPIC.replace(",", " ").split() if w.strip()]
+
+
+def _matches_topic(snippet: Snippet, keywords: list[str]) -> bool:
+    """True if the snippet mentions ANY keyword (case-insensitive). With no
+    keywords every snippet matches - that is the unfiltered, spec-default path."""
+    if not keywords:
+        return True
+    haystack = (snippet["title"] + " " + snippet["text"]).lower()
+    return any(kw in haystack for kw in keywords)
+
+
 def _extract_pmid(record: dict) -> str:
     """
     Find the PubMed ID for a record, trying the most reliable source first:
@@ -158,22 +172,32 @@ def load_corpus(limit: int = config.CORPUS_SUBSET_SIZE) -> list[Snippet]:
     from datasets import load_dataset
 
     stream = load_dataset(config.HF_CORPUS, split="train", streaming=True)
+    keywords = _topic_keywords()
 
     snippets: list[Snippet] = []
     logged_keys = False
-    for i, record in enumerate(stream.take(limit)):
-        # Log the real schema of the FIRST record once, so we can confirm which
-        # column names this particular dataset dump actually uses.
+    for i, record in enumerate(stream):
         if not logged_keys:
+            # Log the real schema of the FIRST record once so we can confirm which
+            # column names this particular dataset dump actually uses.
             print(f"[ingest] first record keys: {sorted(record.keys())}")
             logged_keys = True
+        if len(snippets) >= limit:
+            break  # collected enough
+        if config.CORPUS_SCAN_LIMIT and i >= config.CORPUS_SCAN_LIMIT:
+            print(f"[ingest] scan cap {config.CORPUS_SCAN_LIMIT} reached")
+            break
         snippet = _to_snippet(record, i)
-        if snippet is not None:  # _to_snippet returns None for junk rows
-            snippets.append(snippet)
+        if snippet is None:
+            continue  # junk row (empty / too-short text)
+        if not _matches_topic(snippet, keywords):
+            continue  # off-topic when a CORPUS_TOPIC filter is set
+        snippets.append(snippet)
 
     snippets = _dedupe_by_id(snippets)
     _write_jsonl(snippets, config.CORPUS_PATH)
-    print(f"[ingest] cached {len(snippets)} snippets to {config.CORPUS_PATH}")
+    note = f" (topic filter {keywords})" if keywords else ""
+    print(f"[ingest] cached {len(snippets)} snippets to {config.CORPUS_PATH}{note}")
     return snippets
 
 

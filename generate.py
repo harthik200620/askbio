@@ -189,6 +189,24 @@ def _generate_anthropic(system: str, user: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Relevance guardrail (pure)
+# --------------------------------------------------------------------------- #
+def _passages_too_weak(passages: List[Passage]) -> bool:
+    """
+    True when retrieval found nothing usable: no passages at all, or the best
+    reranked passage scores below ``config.RELEVANCE_THRESHOLD``.
+
+    The reranker's score is our relevance signal, so this makes AskBio abstain on
+    off-topic questions instead of answering from passages that don't actually
+    match. Default threshold is effectively off (-1e9); the demo .env raises it.
+    """
+    if not passages:
+        return True
+    top_score = max(p.get("score", 0.0) for p in passages)
+    return top_score < config.RELEVANCE_THRESHOLD
+
+
+# --------------------------------------------------------------------------- #
 # Public entry point
 # --------------------------------------------------------------------------- #
 def generate_answer(query: str, passages: List[Passage]) -> AnswerResult:
@@ -201,6 +219,16 @@ def generate_answer(query: str, passages: List[Passage]) -> AnswerResult:
       * compute ``abstained`` (True when the answer is the abstain message, or
         the offline backend had no passages to work from).
     """
+    # Relevance guardrail (every backend): abstain up front when retrieval is too
+    # weak, rather than answering from passages that don't match the question.
+    if _passages_too_weak(passages):
+        return AnswerResult(
+            answer=config.ABSTAIN_MESSAGE,
+            citations=[],
+            abstained=True,
+            passages=passages,
+        )
+
     backend = config.LLM_BACKEND
 
     if backend == "none":
