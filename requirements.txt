@@ -1,7 +1,7 @@
 # AskBio dependencies (Python 3.11)
 
 # ---- core pipeline ----
-openai>=1.40                 # embeddings + gpt-4o-mini answers
+openai>=1.40,<2              # embeddings + gpt-4o-mini answers (langchain-openai needs <2)
 anthropic>=0.40              # optional Claude backend for answers
 qdrant-client>=1.11          # vector database client
 datasets>=2.20               # download PubMed corpus + PubMedQA from Hugging Face
@@ -12,7 +12,15 @@ pandas>=2.2
 python-dotenv>=1.0           # load secrets from .env
 
 # ---- evaluation ----
-ragas>=0.2,<0.3              # pinned to the stable 0.2.x line (see LEARN.md for why)
+# ragas 0.2.x is the stable, well-documented line (see LEARN.md). It targets the
+# langchain 0.3.x API; newer langchain 1.x removed modules ragas imports
+# (langchain_community.chat_models.vertexai), so the langchain stack is pinned to
+# 0.3.x here to keep `import ragas` working.
+ragas>=0.2,<0.3
+langchain>=0.3,<0.4
+langchain-core>=0.3,<0.4
+langchain-community>=0.3,<0.4
+langchain-openai>=0.2,<0.3
 matplotlib>=3.8             # eval bar chart
 
 # ---- web app ----

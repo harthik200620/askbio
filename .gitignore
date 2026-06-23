@@ -11,5 +11,7 @@ data/bm25.pkl
 data/embed_progress.json
 data/qdrant_local/
 
-# NOTE: data/eval_results.csv and data/eval_chart.png are intentionally NOT
-# ignored - they are small portfolio artifacts worth committing.
+# Generated eval outputs - regenerate with your own OpenAI key via evaluate.py
+# (don't commit the free-mode placeholder run):
+data/eval_results.csv
+data/eval_chart.png

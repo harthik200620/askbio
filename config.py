@@ -17,7 +17,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()  # read .env into the environment if the file exists
+# Load the .env sitting next to this file, regardless of the current working
+# directory, so `streamlit run`, pytest and the CLIs all see the same settings.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 # --------------------------------------------------------------------------- #
 # Paths
