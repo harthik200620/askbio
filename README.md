@@ -2,8 +2,8 @@
 
 AskBio answers biomedical questions from PubMed research (the Hugging Face `MedRAG/pubmed` corpus). It grounds every answer in retrieved passages and cites the supporting PMIDs inline as `[PMID:xxxx]`. When the retrieved literature doesn't support an answer, it abstains rather than guessing — in a medical setting a confident wrong answer is worse than "I don't know." Retrieval is hybrid (dense + keyword) with cross-encoder reranking, and there's a ragas evaluation harness so you can actually measure output quality instead of just eyeballing the demo.
 
-- **GitHub:** `<add-repo-link>`
-- **Live demo:** `<add-streamlit-link>`
+- **GitHub:** [harthik200620/askbio](https://github.com/harthik200620/askbio)
+- **Live demo:** [askbio.streamlit.app](https://askbio.streamlit.app/)
 
 ---
 
