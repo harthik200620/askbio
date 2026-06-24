@@ -8,6 +8,7 @@ compute_accuracy can be imported and unit-tested with just the stdlib.
 """
 from __future__ import annotations
 
+import os
 import random
 import re
 from typing import Optional
@@ -94,6 +95,10 @@ def _has_openai_key() -> bool:
     return bool(config.OPENAI_API_KEY)
 
 
+def _has_gemini_key() -> bool:
+    return bool(config.GEMINI_API_KEYS)
+
+
 def _build_ragas_judge():
     """Build the (llm, embeddings) judge ragas grades rows with.
 
@@ -115,36 +120,56 @@ def _build_ragas_judge():
     return judge_llm, judge_embeddings
 
 
-def _run_ragas(rows: list[dict]) -> dict:
-    """Score rows with ragas, returning {metric_name: float}.
+def _build_ragas_judge_gemini():
+    """Gemini-backed ragas judge for when there's no OpenAI key.
 
-    rows must already have the keys ragas 0.2.x reads as columns: question,
-    answer, contexts (list[str]), ground_truth. Raises on failure -- the caller
-    catches it and falls back to accuracy only.
+    Uses the first available Gemini key. langchain-google-genai wraps the same
+    models in LangChain's interface so ragas 0.2.x can use them unchanged.
     """
+    from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+    from ragas.embeddings import LangchainEmbeddingsWrapper
+    from ragas.llms import LangchainLLMWrapper
+
+    key = config.GEMINI_API_KEYS[0]
+    chat = ChatGoogleGenerativeAI(
+        model="gemini-2.0-flash",
+        google_api_key=key,
+        temperature=0,
+    )
+    embed = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004",
+        google_api_key=key,
+    )
+    judge_llm = LangchainLLMWrapper(chat)
+    judge_embeddings = LangchainEmbeddingsWrapper(embed)
+    return judge_llm, judge_embeddings
+
+
+def _run_ragas_with_judge(rows: list[dict], judge_builder) -> dict:
+    """Score rows with ragas using a caller-supplied judge builder."""
     from datasets import Dataset
     from ragas import evaluate
     from ragas.metrics import answer_relevancy, context_precision, faithfulness
 
-    judge_llm, judge_embeddings = _build_ragas_judge()
-
+    judge_llm, judge_embeddings = judge_builder()
     dataset = Dataset.from_list(rows)
-    metrics = [faithfulness, answer_relevancy, context_precision]
-
     result = evaluate(
         dataset=dataset,
-        metrics=metrics,
+        metrics=[faithfulness, answer_relevancy, context_precision],
         llm=judge_llm,
         embeddings=judge_embeddings,
     )
-
-    # Average each metric column; works whether a value is a scalar or per-row.
     scores = result.to_pandas()
     out: dict = {}
     for name in ("faithfulness", "answer_relevancy", "context_precision"):
         if name in scores.columns:
             out[name] = float(scores[name].mean())
     return out
+
+
+def _run_ragas(rows: list[dict]) -> dict:
+    """Score rows with ragas using the OpenAI judge, returning {metric_name: float}."""
+    return _run_ragas_with_judge(rows, _build_ragas_judge)
 
 
 def _load_eval_rows(sample_size: int) -> list[dict]:
@@ -293,14 +318,21 @@ def run_eval(sample_size: int = config.EVAL_SAMPLE_SIZE) -> dict:
     # ragas, but skip (don't crash) if there's no key or it errors.
     aggregate: dict = {}
     ragas_skipped = False
-    if not _has_openai_key():
+    skip_ragas = os.getenv("SKIP_RAGAS", "0") == "1"
+    if skip_ragas:
         ragas_skipped = True
-        print("[eval] WARNING: no OPENAI_API_KEY configured - skipping ragas "
-              "metrics (faithfulness / answer_relevancy / context_precision). "
+        print("[eval] SKIP_RAGAS=1 -- skipping ragas, accuracy only.")
+    elif not _has_openai_key() and not _has_gemini_key():
+        ragas_skipped = True
+        print("[eval] WARNING: no API key configured - skipping ragas metrics. "
               "Accuracy is still computed below.")
     else:
         try:
-            aggregate.update(_run_ragas(ragas_rows))
+            if _has_openai_key():
+                aggregate.update(_run_ragas(ragas_rows))
+            else:
+                print("[eval] using Gemini as ragas judge (no OpenAI key)")
+                aggregate.update(_run_ragas_with_judge(ragas_rows, _build_ragas_judge_gemini))
         except Exception as exc:  # noqa: BLE001 - any ragas/API failure is non-fatal
             ragas_skipped = True
             print(f"[eval] WARNING: ragas evaluation failed ({exc!r}) - "
