@@ -259,7 +259,7 @@ def _print_summary(aggregate: dict, ragas_skipped: bool) -> None:
     print("AskBio evaluation summary")
     print("=" * 44)
     if ragas_skipped:
-        print("ragas metrics : SKIPPED (no OpenAI key configured)")
+        print("ragas metrics : SKIPPED (set OPENAI_API_KEY or GEMINI_API_KEY, or unset SKIP_RAGAS)")
     for name in ("faithfulness", "answer_relevancy", "context_precision"):
         if name in aggregate:
             print(f"{name:<22}: {aggregate[name]:.3f}")

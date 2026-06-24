@@ -48,9 +48,14 @@ with st.sidebar:
         "4. **Guardrail** - if the evidence is weak, it abstains instead of hallucinating"
     )
     st.divider()
+    if config.CORPUS_TOPICS:
+        _total = len(config.CORPUS_TOPICS) * config.CORPUS_PER_TOPIC_TARGET
+        _corpus_label = f"~{_total:,} snippets · {len(config.CORPUS_TOPICS)} topics"
+    else:
+        _corpus_label = f"{config.CORPUS_SUBSET_SIZE:,} snippets"
     st.caption(
         f"embeddings: `{config.EMBED_BACKEND}`  |  llm: `{config.LLM_BACKEND}`  |  "
-        f"corpus target: {config.CORPUS_SUBSET_SIZE:,}"
+        f"corpus: {_corpus_label}"
     )
 
 

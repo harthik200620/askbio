@@ -87,6 +87,34 @@ CORPUS_TOPIC = os.getenv("CORPUS_TOPIC", "")
 # Cap on raw rows to stream while hunting for topic matches. 0 = no cap.
 CORPUS_SCAN_LIMIT = int(os.getenv("CORPUS_SCAN_LIMIT", "0"))
 
+# Per-topic corpus: ingest.py fills each topic bucket to this target, giving a
+# dense, balanced corpus across the four covered areas.
+# Total ≈ len(CORPUS_TOPICS) × CORPUS_PER_TOPIC_TARGET ≈ 14,000 snippets.
+CORPUS_PER_TOPIC_TARGET = int(os.getenv("CORPUS_PER_TOPIC_TARGET", "3500"))
+
+CORPUS_TOPICS: dict[str, list[str]] = {
+    "cardiovascular": [
+        "cardiovascular", "hypertension", "heart attack", "myocardial infarction",
+        "coronary artery", "blood pressure", "stroke", "cardiac", "atherosclerosis",
+        "beta-blocker", "statin", "angina", "arrhythmia", "heart failure",
+    ],
+    "diabetes": [
+        "diabetes", "insulin", "glucose", "glycemic", "metformin", "hba1c",
+        "type 2 diabetes", "hyperglycemia", "diabetic", "hypoglycemia",
+        "insulin resistance", "glucagon",
+    ],
+    "analgesics": [
+        "aspirin", "ibuprofen", "paracetamol", "acetaminophen", "nsaid",
+        "analgesic", "antipyretic", "cox-2", "anti-inflammatory",
+        "cyclooxygenase", "fever", "pain relief",
+    ],
+    "antibiotics": [
+        "antibiotic", "amoxicillin", "penicillin", "bacterial infection",
+        "antimicrobial", "antibiotic resistance", "sepsis",
+        "ciprofloxacin", "pathogen", "bacteremia", "pneumonia",
+    ],
+}
+
 # Abstain if the best reranked passage scores below this. Off by default; demo .env raises it.
 RELEVANCE_THRESHOLD = float(os.getenv("RELEVANCE_THRESHOLD", "-1e9"))
 

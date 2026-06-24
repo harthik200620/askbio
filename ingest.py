@@ -118,12 +118,82 @@ def _dedupe_by_id(snippets: list[Snippet]) -> list[Snippet]:
     return unique
 
 
-def load_corpus(limit: int = config.CORPUS_SUBSET_SIZE) -> list[Snippet]:
-    """Return up to limit cleaned snippets, caching them to config.CORPUS_PATH.
+def _load_corpus_topic_focused() -> list[Snippet]:
+    """Stream PubMed and fill per-topic buckets until each reaches its target.
 
-    Resumable: if the cache already has enough rows we read it back instead of
-    re-streaming the dataset.
+    Each snippet is assigned to the first topic whose keywords appear in its
+    title+text. A snippet is never added to more than one bucket, so there are
+    no duplicates before the final _dedupe_by_id pass.
     """
+    from datasets import load_dataset
+
+    targets = config.CORPUS_TOPICS
+    per_target = config.CORPUS_PER_TOPIC_TARGET
+    total_target = len(targets) * per_target
+
+    # Resume: if corpus.jsonl already has enough rows, skip streaming.
+    if _count_lines(config.CORPUS_PATH) >= total_target:
+        print(f"[ingest] corpus already has {total_target}+ rows, reading cache")
+        return _read_jsonl(config.CORPUS_PATH)
+
+    buckets: dict[str, list[Snippet]] = {t: [] for t in targets}
+
+    stream = load_dataset(config.HF_CORPUS, split="train", streaming=True)
+    logged_keys = False
+
+    for i, record in enumerate(stream):
+        if not logged_keys:
+            print(f"[ingest] first record keys: {sorted(record.keys())}")
+            logged_keys = True
+
+        # Progress report every 50k rows scanned
+        if i > 0 and i % 50000 == 0:
+            counts = {t: len(v) for t, v in buckets.items()}
+            print(f"[ingest] scanned {i} rows | {counts}")
+
+        # Stop if every bucket is full
+        if all(len(v) >= per_target for v in buckets.values()):
+            break
+
+        if config.CORPUS_SCAN_LIMIT and i >= config.CORPUS_SCAN_LIMIT:
+            print(f"[ingest] scan cap {config.CORPUS_SCAN_LIMIT} reached")
+            break
+
+        snippet = _to_snippet(record, i)
+        if snippet is None:
+            continue
+
+        haystack = (snippet["title"] + " " + snippet["text"]).lower()
+
+        for topic, keywords in targets.items():
+            if len(buckets[topic]) >= per_target:
+                continue
+            if any(kw in haystack for kw in keywords):
+                buckets[topic].append(snippet)
+                break  # one bucket per snippet — no duplicates
+
+    # Merge and report
+    all_snippets: list[Snippet] = []
+    for topic, snips in buckets.items():
+        print(f"[ingest] {topic}: {len(snips)} snippets")
+        all_snippets.extend(snips)
+
+    all_snippets = _dedupe_by_id(all_snippets)
+    _write_jsonl(all_snippets, config.CORPUS_PATH)
+    print(f"[ingest] total: {len(all_snippets)} snippets -> {config.CORPUS_PATH}")
+    return all_snippets
+
+
+def load_corpus(limit: int = config.CORPUS_SUBSET_SIZE) -> list[Snippet]:
+    """Return cleaned snippets, caching them to config.CORPUS_PATH.
+
+    If CORPUS_TOPICS is configured (the default), uses per-topic bucket filling
+    for a dense, balanced corpus. Otherwise falls back to a flat keyword/limit scan.
+    """
+    if config.CORPUS_TOPICS:
+        return _load_corpus_topic_focused()
+
+    # Flat fallback (no topics defined): first N snippets matching CORPUS_TOPIC.
     if _count_lines(config.CORPUS_PATH) >= limit:
         return _read_jsonl(config.CORPUS_PATH, limit=limit)
 
@@ -136,7 +206,6 @@ def load_corpus(limit: int = config.CORPUS_SUBSET_SIZE) -> list[Snippet]:
     logged_keys = False
     for i, record in enumerate(stream):
         if not logged_keys:
-            # Dump the first record's keys once to see what columns this dump has.
             print(f"[ingest] first record keys: {sorted(record.keys())}")
             logged_keys = True
         if len(snippets) >= limit:
