@@ -24,8 +24,6 @@ import config
 st.set_page_config(page_title="AskBio - biomedical RAG", page_icon="🧬", layout="centered")
 
 
-# cache_resource keeps the models/indexes loaded once instead of rebuilding them
-# on every rerun. Imports are inside so a load error surfaces in the app.
 @st.cache_resource(show_spinner=False)
 def _pipeline():
     import retrieve
@@ -35,17 +33,23 @@ def _pipeline():
 
 st.title("🧬 AskBio")
 st.caption(
-    "Answers biomedical questions from real PubMed research - with citations - "
+    "Answers biomedical questions from real PubMed research — with citations — "
     "and refuses to guess when the literature doesn't cover the question."
+)
+st.info(
+    "This demo indexes PubMed literature on **cardiovascular disease**, **type 2 diabetes**, "
+    "**common pain and fever medications** (aspirin, ibuprofen, paracetamol), and "
+    "**bacterial infections and antibiotics** — try the examples below or ask your own.",
+    icon="📚",
 )
 
 with st.sidebar:
     st.subheader("How it works")
     st.markdown(
-        "1. **Hybrid retrieval** - meaning search (embeddings) + keyword search (BM25)\n"
-        "2. **Reranking** - a cross-encoder re-sorts the best passages to the top\n"
-        "3. **Grounded answer** - the LLM answers *only* from those passages and cites PMIDs\n"
-        "4. **Guardrail** - if the evidence is weak, it abstains instead of hallucinating"
+        "1. **Hybrid retrieval** — meaning search (embeddings) + keyword search (BM25)\n"
+        "2. **Reranking** — a cross-encoder re-sorts the best passages to the top\n"
+        "3. **Grounded answer** — the LLM answers *only* from those passages and cites PMIDs\n"
+        "4. **Guardrail** — if the evidence is weak, it abstains instead of hallucinating"
     )
     st.divider()
     if config.CORPUS_TOPICS:
@@ -59,16 +63,39 @@ with st.sidebar:
     )
 
 
-EXAMPLE = "What is the link between the gut microbiome and immunity?"
-# Using a form so the input and submit arrive together (Enter submits too).
+# --- Example questions ---
+EXAMPLES = [
+    "How does aspirin affect the risk of heart attack?",
+    "What are first-line treatments for type 2 diabetes?",
+    "Does ibuprofen reduce fever in children?",
+    "How do beta-blockers lower blood pressure?",
+    "What antibiotics are used to treat bacterial pneumonia?",
+]
+
+if "question" not in st.session_state:
+    st.session_state.question = ""
+
+st.write("**Try an example:**")
+cols = st.columns(len(EXAMPLES))
+for col, example in zip(cols, EXAMPLES):
+    if col.button(example, use_container_width=True):
+        st.session_state.question = example
+
+# --- Question form ---
 with st.form("ask_form"):
-    question = st.text_input("Ask a biomedical question:", placeholder=EXAMPLE)
+    question = st.text_input(
+        "Or ask your own question:",
+        value=st.session_state.question,
+        placeholder="e.g. How does aspirin affect the risk of heart attack?",
+    )
     ask = st.form_submit_button("Ask AskBio", type="primary")
 
 if ask and question.strip():
+    st.session_state.question = question  # preserve across reruns
+
     try:
         retrieve_fn, generate_fn = _pipeline()
-    except Exception as exc:  # noqa: BLE001 - surface load errors to the user
+    except Exception as exc:
         st.error(f"Pipeline failed to load: {exc}")
         st.stop()
 
@@ -79,7 +106,7 @@ if ask and question.strip():
 
     st.divider()
     if result["abstained"]:
-        st.warning(result["answer"])  # abstained -> show it as a warning
+        st.warning(result["answer"])
     else:
         st.markdown(result["answer"])
 
@@ -87,7 +114,7 @@ if ask and question.strip():
     if citations:
         st.subheader(f"Sources ({len(citations)})")
         for c in citations:
-            label = f"PMID {c['pmid']} - {c['title'] or 'PubMed article'}"
+            label = f"PMID {c['pmid']} — {c['title'] or 'PubMed article'}"
             with st.expander(label):
                 st.markdown(f"[Open on PubMed]({c['url']})")
 
