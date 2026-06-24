@@ -34,21 +34,21 @@ _BM25_BUNDLE: Optional[dict] = None
 _CROSS_ENCODER = None  # sentence_transformers.CrossEncoder
 
 
-def dense_search(query: str, top_k: int = config.DENSE_TOP_K) -> list[Passage]:
+def dense_search(query: str, top_k: int = config.DENSE_TOP_K, collection: str = None) -> list[Passage]:
     """Embed the query and return its top_k nearest snippets from Qdrant.
 
     Embeds via embed_index so query and corpus share one embedding path; the
     payload already holds id/pmid/title/text, so we just attach Qdrant's score.
+    collection: if set, search that collection instead of config.QDRANT_COLLECTION.
     """
     import embed_index
 
     query_vector = embed_index.embed_texts([query])[0]
     client = embed_index.get_qdrant_client()
+    coll = collection or config.QDRANT_COLLECTION
 
-    # qdrant-client >=1.12 dropped .search() for .query_points(); hits come back
-    # under .points (each a ScoredPoint with .payload/.score).
     response = client.query_points(
-        collection_name=config.QDRANT_COLLECTION,
+        collection_name=coll,
         query=query_vector,
         limit=top_k,
         with_payload=True,
@@ -245,11 +245,17 @@ def rerank(
     return scored[:top_k]
 
 
-def retrieve(query: str, top_k: int = config.RERANK_TOP_K) -> list[Passage]:
+def retrieve(query: str, top_k: int = config.RERANK_TOP_K, collection: str = None) -> list[Passage]:
     """Full pipeline: dense + BM25 -> RRF fuse -> cross-encoder rerank.
 
+    If collection is set (e.g., for eval), use that instead of the default.
+    When using a non-default collection, skip BM25 (only do dense + rerank).
     The one entry point generate.py / evaluate.py / app.py call.
     """
+    if collection:
+        dense_hits = dense_search(query, collection=collection)
+        return rerank(query, dense_hits, top_k=top_k)
+
     dense_hits = dense_search(query)
     bm25_hits = bm25_search(query)
     fused = rrf_fuse([dense_hits, bm25_hits], top_k=config.RRF_TOP_K)

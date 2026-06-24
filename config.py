@@ -31,6 +31,10 @@ CORPUS_SUBSET_SIZE = int(os.getenv("CORPUS_SUBSET_SIZE", "100000"))
 HF_EVAL = "qiaojin/PubMedQA"
 EVAL_CONFIG = "pqa_labeled"          # expert-labeled split (yes/no/maybe)
 EVAL_SAMPLE_SIZE = int(os.getenv("EVAL_SAMPLE_SIZE", "50"))
+# Eval corpus: fair evaluation indexes PubMedQA abstracts in a separate collection
+# so retrieval can actually find the answers (they won't be in the main corpus).
+EVAL_QDRANT_COLLECTION = os.getenv("EVAL_QDRANT_COLLECTION", "askbio_pqa_eval")
+BUILD_EVAL_CORPUS = os.getenv("BUILD_EVAL_CORPUS", "0") == "1"
 
 # Embeddings. EMBED_BACKEND: "local" (default, free CPU) or "openai".
 EMBED_BACKEND = os.getenv("EMBED_BACKEND", "local").lower()

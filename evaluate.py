@@ -193,16 +193,91 @@ def _load_eval_rows(sample_size: int) -> list[dict]:
     return items
 
 
-def _answer_one(question: str) -> dict:
+def _build_eval_corpus() -> None:
+    """Index PubMedQA labeled abstracts into a separate eval collection.
+
+    This makes evaluation fair: questions can be answered from their own
+    abstracts rather than failing to find relevant snippets in the main corpus.
+    """
+    from datasets import load_dataset
+    import embed_index
+    from schemas import Snippet
+
+    print("[eval] building eval corpus from PubMedQA abstracts...")
+    ds = load_dataset(config.HF_EVAL, config.EVAL_CONFIG, split="train")
+
+    snippets: list[Snippet] = []
+    for i, record in enumerate(ds):
+        abstract = str(record.get("long_answer", "")).strip()
+        if len(abstract) < 20:
+            continue
+        snippets.append(
+            Snippet(
+                id=str(record.get("pubmed_id") or i),
+                pmid=str(record.get("pubmed_id") or i),
+                title=str(record.get("question", ""))[:100],
+                text=abstract,
+            )
+        )
+
+    print(f"[eval] loaded {len(snippets)} PubMedQA abstracts")
+
+    client = embed_index.get_qdrant_client()
+
+    if client.collection_exists(config.EVAL_QDRANT_COLLECTION):
+        client.delete_collection(config.EVAL_QDRANT_COLLECTION)
+        print(f"[eval] deleted existing collection {config.EVAL_QDRANT_COLLECTION}")
+
+    from qdrant_client.models import Distance, VectorParams
+
+    client.create_collection(
+        collection_name=config.EVAL_QDRANT_COLLECTION,
+        vectors_config=VectorParams(
+            size=embed_index.embed_dim() if hasattr(embed_index, "embed_dim") else config.embed_dim(),
+            distance=Distance.COSINE,
+        ),
+    )
+    print(f"[eval] created collection {config.EVAL_QDRANT_COLLECTION}")
+
+    for i, snip in enumerate(snippets):
+        if i % 1000 == 0 and i > 0:
+            print(f"[eval] embedded {i} / {len(snippets)}")
+
+    vectors = embed_index.embed_texts([s["text"] for s in snippets])
+    from qdrant_client.models import PointStruct
+
+    points = [
+        PointStruct(
+            id=embed_index._point_id(s["id"]),
+            vector=vec,
+            payload={
+                "id": s["id"],
+                "pmid": s["pmid"],
+                "title": s["title"],
+                "text": s["text"],
+            },
+        )
+        for s, vec in zip(snippets, vectors)
+    ]
+
+    for batch_start in range(0, len(points), 128):
+        batch = points[batch_start : batch_start + 128]
+        client.upsert(collection_name=config.EVAL_QDRANT_COLLECTION, points=batch)
+
+    print(f"[eval] indexed {len(snippets)} abstracts into {config.EVAL_QDRANT_COLLECTION}")
+
+
+def _answer_one(question: str, eval_collection: str = None) -> dict:
     """Retrieve + generate for one question. Returns answer and contexts.
 
+    If eval_collection is set, search that collection (for fair eval).
     Imports are lazy so the module loads (and the pure helpers test) without the
     retrieval/generation stack installed.
     """
     import generate
     import retrieve
 
-    passages = retrieve.retrieve(question)
+    passages = retrieve.retrieve(question, collection=eval_collection)
     res = generate.generate_answer(question, passages)
     contexts = [p["text"] for p in passages]
     return {"answer": res["answer"], "contexts": contexts}
@@ -275,6 +350,11 @@ def run_eval(sample_size: int = config.EVAL_SAMPLE_SIZE) -> dict:
     """Run the whole eval: sample PubMedQA, retrieve+generate per item, score
     with ragas (skipped if no key), compute accuracy, write outputs, return the
     aggregate dict."""
+    eval_coll = None
+    if config.BUILD_EVAL_CORPUS:
+        _build_eval_corpus()
+        eval_coll = config.EVAL_QDRANT_COLLECTION
+
     items = _load_eval_rows(sample_size)
     print(f"[eval] evaluating {len(items)} PubMedQA items "
           f"(seed={config.RANDOM_SEED})")
@@ -288,7 +368,7 @@ def run_eval(sample_size: int = config.EVAL_SAMPLE_SIZE) -> dict:
         gold = item["final_decision"]
         ground_truth = item["long_answer"]
 
-        result = _answer_one(question)
+        result = _answer_one(question, eval_collection=eval_coll)
         answer = result["answer"]
         contexts = result["contexts"]
 
