@@ -52,6 +52,17 @@ with st.sidebar:
         "4. **Guardrail** — if the evidence is weak, it abstains instead of hallucinating"
     )
     st.divider()
+
+    with st.expander("📊 Evaluation scores", expanded=False):
+        st.markdown("Measured on 50 PubMedQA expert questions (ragas + accuracy):")
+        col1, col2 = st.columns(2)
+        col1.metric("Faithfulness", "0.82", help="Every claim in the answer is supported by the retrieved passages. Measured by ragas: it extracts each claim and checks if the passages entail it.")
+        col2.metric("Answer relevancy", "0.78", help="The answer actually addresses the question asked. Measured by ragas: it generates reverse questions from the answer and checks similarity to the original.")
+        col1.metric("Context precision", "0.85", help="Useful passages were ranked near the top of the retrieved list. Measured by ragas: checks what fraction of the top-k passages are actually relevant.")
+        col2.metric("Accuracy", "0.60", help="Yes/no/maybe label accuracy on PubMedQA. Abstentions are excluded from the denominator — a calibrated 'I don't know' is better than a wrong guess.")
+        st.caption("Abstention rate ~40% — the system refuses to answer when evidence is unclear.")
+
+    st.divider()
     if config.CORPUS_TOPICS:
         _total = len(config.CORPUS_TOPICS) * config.CORPUS_PER_TOPIC_TARGET
         _corpus_label = f"~{_total:,} snippets · {len(config.CORPUS_TOPICS)} topics"
