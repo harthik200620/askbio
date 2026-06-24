@@ -155,8 +155,12 @@ def build_index() -> None:
     already_done = _read_progress()
     if already_done >= total:
         already_done = total
-    if already_done == 0:
+
+    collection_missing = not client.collection_exists(config.QDRANT_COLLECTION)
+    if already_done == 0 or collection_missing:
         _recreate_collection(client)
+        already_done = 0  # force full re-upload if collection was gone
+        _write_progress(0)
         print(f"created collection {config.QDRANT_COLLECTION!r}")
     else:
         print(f"resuming: {already_done} / {total} already embedded")
