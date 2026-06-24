@@ -230,10 +230,11 @@ def _build_eval_corpus() -> None:
 
     from qdrant_client.models import Distance, VectorParams
 
+    embed_dim = 384 if config.EMBED_BACKEND == "local" else 768
     client.create_collection(
         collection_name=config.EVAL_QDRANT_COLLECTION,
         vectors_config=VectorParams(
-            size=embed_index.embed_dim() if hasattr(embed_index, "embed_dim") else config.embed_dim(),
+            size=embed_dim,
             distance=Distance.COSINE,
         ),
     )
